@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#101828" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="漠翠进销存" />
+  <title>漠翠进销存</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <div class="brand">漠翠进销存</div>
+        <div id="pageSubtitle" class="subtitle">云端同步版</div>
+      </div>
+      <button id="topAction" class="icon-btn hidden" type="button" aria-label="页面操作">＋</button>
+    </header>
+
+    <main id="main" class="main"></main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button data-route="dashboard" class="nav-item active"><span>⌂</span><b>概况</b></button>
+      <button data-route="products" class="nav-item"><span>◫</span><b>商品</b></button>
+      <button data-route="sale-new" class="nav-item nav-primary"><span>＋</span><b>开单</b></button>
+      <button data-route="loans" class="nav-item"><span>⇄</span><b>调借</b></button>
+      <button data-route="reports" class="nav-item"><span>▥</span><b>报表</b></button>
+      <button data-route="more" class="nav-item"><span>•••</span><b>更多</b></button>
+    </nav>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast"></div>
+
+  <script src="cloud.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
