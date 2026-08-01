@@ -22,18 +22,12 @@
 
   "r2_buckets": [
     {
-      "binding": "STORAGE"
+      "binding": "STORAGE",
+      "bucket_name": "mocui-inventory-cloudflare-storage"
     }
   ],
 
-  "vars": {
-    "APP_RELEASE": "1.0.0",
-    "APP_MODE": "self-use",
-    "INITIAL_SETUP_CODE": "nRshQCgM9NwvxrCP2H4KfGBo"
-  },
-
   "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1
+    "enabled": true
   }
 }
