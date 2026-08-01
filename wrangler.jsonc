@@ -4,29 +4,34 @@
   "main": "src/index.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
+
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+
   "d1_databases": [
-  {
-    "binding": "DB",
-    "database_name": "mocui-inventory-cloudflare-db",
-    "database_id": "130f6d4c-00d7-4c34-92f7-82f8a7711f06"
-  }
-]
+    {
+      "binding": "DB",
+      "database_name": "mocui-inventory-cloudflare-db",
+      "database_id": "130f6d4c-00d7-4c34-92f7-82f8a7711f06"
+    }
+  ],
+
   "r2_buckets": [
     {
       "binding": "STORAGE"
     }
   ],
+
   "vars": {
     "APP_RELEASE": "1.0.0",
     "APP_MODE": "self-use",
     "INITIAL_SETUP_CODE": "nRshQCgM9NwvxrCP2H4KfGBo"
   },
+
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
