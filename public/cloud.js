@@ -4,16 +4,30 @@
   let timer = null;
   let syncing = false;
   let dirty = false;
+  let mode = 'checking';
+  let health = null;
+  const deviceId = (() => {
+    const key = 'mocui_cloud_device_id';
+    let value = localStorage.getItem(key);
+    if (!value) {
+      value = crypto.randomUUID();
+      localStorage.setItem(key, value);
+    }
+    return value;
+  })();
 
   const api = async (path, options = {}) => {
+    const headers = {...(options.headers || {})};
+    if (options.body && !headers['content-type']) headers['content-type'] = 'application/json';
     const res = await fetch(path, {
       credentials: 'same-origin',
-      headers: {'content-type':'application/json', ...(options.headers || {})},
       ...options,
+      headers,
     });
-    const body = await res.json().catch(() => ({}));
+    const type = res.headers.get('content-type') || '';
+    const body = type.includes('application/json') ? await res.json().catch(() => ({})) : await res.text();
     if (!res.ok) {
-      const error = new Error(body.error || `请求失败 ${res.status}`);
+      const error = new Error(body?.error || body || `请求失败 ${res.status}`);
       error.status = res.status;
       error.payload = body;
       throw error;
@@ -21,36 +35,85 @@
     return body;
   };
 
-  const login = () => new Promise((resolve) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'cloud-login';
-    wrap.innerHTML = `<div class="cloud-login-card"><h1>漠翠进销存</h1><p>请输入云端管理密码</p><form><input type="password" autocomplete="current-password" placeholder="管理密码" required><button type="submit">登录</button><div class="cloud-login-error"></div></form></div>`;
-    document.body.appendChild(wrap);
-    const form = wrap.querySelector('form');
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      const button = form.querySelector('button');
-      const error = form.querySelector('.cloud-login-error');
-      button.disabled = true; error.textContent = '';
-      try {
-        await api('/api/auth/login', {method:'POST', body:JSON.stringify({password:form.querySelector('input').value})});
-        wrap.remove(); resolve();
-      } catch (e) {
-        error.textContent = e.message;
-        button.disabled = false;
-      }
-    };
-  });
+  const setStatus = (nextMode, text = '') => {
+    mode = nextMode;
+    const subtitle = document.querySelector('#pageSubtitle');
+    const badge = document.querySelector('#cloudBadge');
+    if (subtitle) subtitle.textContent = text || (mode === 'cloud' ? 'Cloudflare 云端同步' : '本机模式');
+    if (badge) {
+      badge.className = `cloud-badge ${mode}`;
+      badge.textContent = mode === 'cloud' ? '云端' : mode === 'syncing' ? '同步中' : mode === 'error' ? '同步异常' : '本机';
+    }
+    document.documentElement.dataset.cloudMode = mode;
+    window.dispatchEvent(new CustomEvent('cloud-mode-change', {detail:{mode, health}}));
+  };
+
+  function authScreen({setup = false} = {}) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'cloud-login';
+      wrap.innerHTML = setup
+        ? `<div class="cloud-login-card"><div class="setup-mark">首次初始化</div><h1>漠翠进销存</h1><p>输入项目包里的“一次性初始化码”，再设置你自己的管理密码。</p><form>
+            <label>一次性初始化码</label><input name="setupCode" autocomplete="one-time-code" placeholder="查看 FIRST_LOGIN.txt" required>
+            <label>设置管理密码</label><input name="password" type="password" autocomplete="new-password" placeholder="至少10位" minlength="10" required>
+            <label>再次输入密码</label><input name="confirm" type="password" autocomplete="new-password" placeholder="再次确认" minlength="10" required>
+            <button type="submit">完成初始化并进入系统</button><div class="cloud-login-error"></div>
+          </form><small>初始化成功后，一次性初始化码自动失效。</small></div>`
+        : `<div class="cloud-login-card"><h1>漠翠进销存</h1><p>请输入管理密码</p><form>
+            <input name="password" type="password" autocomplete="current-password" placeholder="管理密码" required>
+            <button type="submit">登录</button><div class="cloud-login-error"></div>
+          </form><small>系统仅供你本人使用，数据保存在 Cloudflare D1 与 R2。</small></div>`;
+      document.body.appendChild(wrap);
+      const form = wrap.querySelector('form');
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        const button = form.querySelector('button');
+        const error = form.querySelector('.cloud-login-error');
+        const password = form.elements.password.value;
+        if (setup && password !== form.elements.confirm.value) {
+          error.textContent = '两次输入的密码不一致';
+          return;
+        }
+        button.disabled = true;
+        error.textContent = '';
+        try {
+          if (setup) {
+            await api('/api/auth/setup', {
+              method:'POST',
+              body:JSON.stringify({setupCode:form.elements.setupCode.value.trim(), password}),
+            });
+          } else {
+            await api('/api/auth/login', {method:'POST', body:JSON.stringify({password})});
+          }
+          wrap.remove();
+          resolve();
+        } catch (e) {
+          error.textContent = e.message;
+          button.disabled = false;
+        }
+      };
+    });
+  }
 
   async function ensureAuthenticated() {
-    try { await api('/api/auth/me'); }
-    catch (e) { if (e.status === 401) { await login(); } else throw e; }
+    try {
+      await api('/api/auth/me');
+    } catch (e) {
+      if (e.status === 401) await authScreen();
+      else throw e;
+    }
   }
 
   async function exportStores() {
     const stores = {};
     for (const name of STORES) stores[name] = await dbAll(name);
-    return {app:'漠翠进销存', version:'1.4-cloud', exportedAt:new Date().toISOString(), stores};
+    return {
+      app:'漠翠进销存',
+      version:'1.0-cloud',
+      exportedAt:new Date().toISOString(),
+      deviceId,
+      stores,
+    };
   }
 
   async function importStores(snapshot) {
@@ -61,47 +124,124 @@
         await dbClear(name, true);
         for (const row of snapshot.stores[name] || []) await dbPut(name, row, true);
       }
-    } finally { window.__cloudImporting = false; }
-  }
-
-  async function pull() {
-    const result = await api('/api/sync');
-    revision = Number(result.revision || 0);
-    if (result.snapshot) await importStores(result.snapshot);
-  }
-
-  async function push() {
-    if (syncing || window.__cloudImporting) { dirty = true; return; }
-    syncing = true; dirty = false;
-    try {
-      const snapshot = await exportStores();
-      const result = await api('/api/sync', {method:'PUT', body:JSON.stringify({revision, snapshot})});
-      revision = Number(result.revision || revision + 1);
-      window.dispatchEvent(new CustomEvent('cloud-sync-ok', {detail:{revision}}));
-    } catch (e) {
-      if (e.status === 409) {
-        const useRemote = window.confirm('云端数据已在其他设备更新。点击“确定”载入云端数据；点击“取消”保留本机数据并稍后手动处理。');
-        if (useRemote) { await pull(); location.reload(); }
-      } else {
-        console.error('cloud sync failed', e);
-        window.dispatchEvent(new CustomEvent('cloud-sync-error', {detail:{message:e.message}}));
-      }
     } finally {
-      syncing = false;
-      if (dirty) schedule(600);
+      window.__cloudImporting = false;
     }
   }
 
-  function schedule(delay = 900) {
-    if (window.__cloudImporting) return;
+  async function pull() {
+    if (mode !== 'cloud') return {skipped:true, mode};
+    setStatus('syncing', '正在读取云端数据');
+    try {
+      const result = await api('/api/sync');
+      revision = Number(result.revision || 0);
+      if (result.snapshot) await importStores(result.snapshot);
+      setStatus('cloud', result.updatedAt ? `云端已同步 · ${new Date(result.updatedAt).toLocaleString('zh-CN')}` : 'Cloudflare 云端同步');
+      return result;
+    } catch (error) {
+      setStatus('error', '云端读取失败');
+      throw error;
+    }
+  }
+
+  async function push({force = false} = {}) {
+    if (mode !== 'cloud' && mode !== 'error') return {skipped:true, mode};
+    if (syncing || window.__cloudImporting) {
+      dirty = true;
+      return {queued:true};
+    }
+    syncing = true;
+    dirty = false;
+    setStatus('syncing', '正在保存到云端');
+    try {
+      const snapshot = await exportStores();
+      const result = await api(`/api/sync${force ? '?force=1' : ''}`, {
+        method:'PUT',
+        body:JSON.stringify({revision, snapshot, deviceId}),
+      });
+      revision = Number(result.revision || revision + 1);
+      if (result.snapshot) await importStores(result.snapshot);
+      setStatus('cloud', `云端已保存 · 版本 ${revision}`);
+      window.dispatchEvent(new CustomEvent('cloud-sync-ok', {detail:{revision}}));
+      return result;
+    } catch (e) {
+      if (e.status === 409) {
+        setStatus('error', '检测到其他设备的新数据');
+        const useRemote = window.confirm('云端数据已在其他设备更新。\n\n点击“确定”：载入云端最新数据。\n点击“取消”：保留本机数据，稍后可在“更多→数据与设置”选择覆盖云端。');
+        if (useRemote) {
+          setStatus('cloud');
+          await pull();
+          location.reload();
+        }
+      } else {
+        console.error('cloud sync failed', e);
+        setStatus('error', `同步失败：${e.message}`);
+        window.dispatchEvent(new CustomEvent('cloud-sync-error', {detail:{message:e.message}}));
+      }
+      throw e;
+    } finally {
+      syncing = false;
+      if (dirty) schedule(800);
+    }
+  }
+
+  function schedule(delay = 1000) {
+    if (!['cloud','error'].includes(mode) || window.__cloudImporting) return;
     clearTimeout(timer);
-    timer = setTimeout(push, delay);
+    timer = setTimeout(() => void push().catch(() => {}), delay);
   }
 
   async function bootstrap() {
-    await ensureAuthenticated();
-    await pull();
+    try {
+      health = await api('/api/health');
+      if (health.needsSetup) await authScreen({setup:true});
+      await ensureAuthenticated();
+      setStatus('cloud');
+      await pull();
+    } catch (error) {
+      console.error('cloud bootstrap failed', error);
+      setStatus('error', `云端连接失败：${error.message}`);
+      throw error;
+    }
+    return {mode, health};
   }
 
-  window.CloudSync = {bootstrap, pull, push, schedule, logout:() => api('/api/auth/logout',{method:'POST'}).then(()=>location.reload())};
+  async function logout() {
+    await api('/api/auth/logout', {method:'POST'});
+    location.reload();
+  }
+
+  async function changePassword(oldPassword, newPassword) {
+    return api('/api/auth/change-password', {
+      method:'POST',
+      body:JSON.stringify({oldPassword, newPassword}),
+    });
+  }
+
+  async function listBackups() {
+    return api('/api/backups');
+  }
+
+  async function restoreBackup(backupRevision) {
+    const result = await api(`/api/backups/${backupRevision}/restore`, {method:'POST'});
+    revision = Number(result.revision || revision);
+    if (result.snapshot) await importStores(result.snapshot);
+    return result;
+  }
+
+  window.CloudSync = {
+    bootstrap,
+    pull,
+    push,
+    forcePush: () => push({force:true}),
+    schedule,
+    logout,
+    changePassword,
+    listBackups,
+    restoreBackup,
+    get mode() { return mode; },
+    get health() { return health; },
+    get revision() { return revision; },
+    get deviceId() { return deviceId; },
+  };
 })();

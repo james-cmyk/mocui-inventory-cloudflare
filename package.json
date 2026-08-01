@@ -1,18 +1,15 @@
 {
   "name": "mocui-inventory-cloudflare",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply mocui-inventory-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply mocui-inventory-db --remote"
+    "check": "node --check src/index.js && wrangler deploy --dry-run",
+    "types": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
-    "typescript": "latest",
-    "wrangler": "latest"
+    "wrangler": "^4.68.0"
   }
 }
