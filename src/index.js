@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "2.0.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -295,18 +295,27 @@ async function recordLoginFailure(env, rate) {
 async function setupAdmin(request, env) {
   const existing = await getSetting(env, "admin_password");
   if (existing) return json({ error: "系统已经完成初始化" }, 409);
+
   const body = await readJson(request);
-  const setupCode = String(body.setupCode || "");
   const password = String(body.password || "");
-  if (!env.INITIAL_SETUP_CODE || !(await safeEqualText(setupCode, env.INITIAL_SETUP_CODE))) {
-    await audit(env, request, "setup_failed", "invalid setup code");
-    return json({ error: "一次性初始化码不正确" }, 401);
-  }
   if (password.length < 10) return json({ error: "管理密码至少需要10位" }, 400);
-  await setSetting(env, "admin_password", await makePasswordRecord(password));
-  await setSetting(env, "initialized_at", String(Date.now()));
+  if (password.length > 128) return json({ error: "管理密码不能超过128位" }, 400);
+
+  // 只有第一位完成初始化的人可以写入管理员密码。
+  // INSERT OR IGNORE 避免两台设备同时初始化时后提交者覆盖先提交者。
+  const passwordRecord = await makePasswordRecord(password);
+  const now = Date.now();
+  const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO app_settings
+    (key, value, updated_at) VALUES ('admin_password', ?, ?)`)
+    .bind(passwordRecord, now)
+    .run();
+  if (Number(inserted.meta?.changes || 0) !== 1) {
+    return json({ error: "系统已在其他设备完成初始化，请直接登录" }, 409);
+  }
+
+  await setSetting(env, "initialized_at", String(now));
   const session = await createSession(request, env);
-  await audit(env, request, "setup_complete", "administrator initialized");
+  await audit(env, request, "setup_complete", "administrator initialized without setup code");
   return json({ ok: true }, 200, { "set-cookie": session.cookie });
 }
 
@@ -554,6 +563,7 @@ async function health(env) {
     mode: "cloud",
     cloudConfigured: true,
     needsSetup: !initialized,
+    setupMode: "set-password",
     revision: Number(state?.revision || 0),
     updatedAt: Number(state?.updated_at || 0),
   });

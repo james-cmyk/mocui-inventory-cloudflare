@@ -53,12 +53,11 @@
       const wrap = document.createElement('div');
       wrap.className = 'cloud-login';
       wrap.innerHTML = setup
-        ? `<div class="cloud-login-card"><div class="setup-mark">首次初始化</div><h1>漠翠进销存</h1><p>输入项目包里的“一次性初始化码”，再设置你自己的管理密码。</p><form>
-            <label>一次性初始化码</label><input name="setupCode" autocomplete="one-time-code" placeholder="查看 FIRST_LOGIN.txt" required>
-            <label>设置管理密码</label><input name="password" type="password" autocomplete="new-password" placeholder="至少10位" minlength="10" required>
-            <label>再次输入密码</label><input name="confirm" type="password" autocomplete="new-password" placeholder="再次确认" minlength="10" required>
-            <button type="submit">完成初始化并进入系统</button><div class="cloud-login-error"></div>
-          </form><small>初始化成功后，一次性初始化码自动失效。</small></div>`
+        ? `<div class="cloud-login-card"><div class="setup-mark">首次设置</div><h1>漠翠进销存</h1><p>这是你的私人进销存。请直接设置管理密码，完成后系统会自动登录。</p><form>
+            <label>设置管理密码</label><input name="password" type="password" autocomplete="new-password" placeholder="至少10位" minlength="10" maxlength="128" required autofocus>
+            <label>再次输入密码</label><input name="confirm" type="password" autocomplete="new-password" placeholder="再次确认" minlength="10" maxlength="128" required>
+            <button type="submit">设置密码并进入系统</button><div class="cloud-login-error"></div>
+          </form><small>首次设置只允许成功一次。请使用不与微信、邮箱或银行卡相同的独立密码。</small></div>`
         : `<div class="cloud-login-card"><h1>漠翠进销存</h1><p>请输入管理密码</p><form>
             <input name="password" type="password" autocomplete="current-password" placeholder="管理密码" required>
             <button type="submit">登录</button><div class="cloud-login-error"></div>
@@ -80,7 +79,7 @@
           if (setup) {
             await api('/api/auth/setup', {
               method:'POST',
-              body:JSON.stringify({setupCode:form.elements.setupCode.value.trim(), password}),
+              body:JSON.stringify({password}),
             });
           } else {
             await api('/api/auth/login', {method:'POST', body:JSON.stringify({password})});
@@ -109,7 +108,7 @@
     for (const name of STORES) stores[name] = await dbAll(name);
     return {
       app:'漠翠进销存',
-      version:'1.0-cloud',
+      version:'2.0-cloud',
       exportedAt:new Date().toISOString(),
       deviceId,
       stores,
