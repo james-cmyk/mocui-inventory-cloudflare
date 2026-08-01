@@ -1,9 +1,12 @@
-const CACHE='mocui-inventory-final-v2-0-0';
-const CORE=['./','./index.html','./app.css','./cloud.js','./app.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-inventory-pwa-v2-2-0';
+const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
-  self.skipWaiting();
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
+});
+
+self.addEventListener('message',event=>{
+  if(event.data?.type==='SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate',event=>{
@@ -17,9 +20,8 @@ async function networkFirst(request,fallback){
   try{
     const response=await fetch(request,{cache:'no-store'});
     if(response.ok){
-      const copy=response.clone();
       const cache=await caches.open(CACHE);
-      await cache.put(request,copy);
+      await cache.put(request,response.clone());
     }
     return response;
   }catch{
@@ -29,10 +31,10 @@ async function networkFirst(request,fallback){
 
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
-  if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
+  if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')) return;
 
   if(event.request.mode==='navigate'){
-    event.respondWith(networkFirst(event.request,'./index.html'));
+    event.respondWith(networkFirst(event.request,'./offline.html'));
     return;
   }
 
