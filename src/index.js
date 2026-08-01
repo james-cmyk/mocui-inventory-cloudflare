@@ -1,11 +1,11 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 8;
-const PASSWORD_ITERATIONS = 210_000;
+const PASSWORD_ITERATIONS = 100_000;
 const MAX_REQUEST_BYTES = 24 * 1024 * 1024;
 const KEEP_BACKUPS = 50;
 
@@ -303,7 +303,16 @@ async function setupAdmin(request, env) {
 
   // 只有第一位完成初始化的人可以写入管理员密码。
   // INSERT OR IGNORE 避免两台设备同时初始化时后提交者覆盖先提交者。
-  const passwordRecord = await makePasswordRecord(password);
+  let passwordRecord;
+  try {
+    passwordRecord = await makePasswordRecord(password);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "password_hash_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return json({ error: "密码加密失败，请稍后重试" }, 500);
+  }
   const now = Date.now();
   const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO app_settings
     (key, value, updated_at) VALUES ('admin_password', ?, ?)`)
