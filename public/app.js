@@ -228,12 +228,29 @@ function setActiveNav(route){
 }
 async function navigate(route,params={}){ appState.route=route; appState.params=params; setActiveNav(route); await render(); window.scrollTo({top:0,behavior:'instant'}); }
 
-function openModal(title,content,{full=false,onOpen=null}={}){
-  const root=$('#modalRoot'); root.innerHTML=`<div class="modal-backdrop"><section class="modal ${full?'full':''}"><div class="modal-head"><div class="modal-title">${esc(title)}</div><button class="modal-close" type="button">×</button></div><div class="modal-body">${content}</div></section></div>`;
-  $('.modal-close',root).onclick=closeModal; $('.modal-backdrop',root).addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal();});
+let modalHistoryActive=false;
+function openModal(title,content,{full=false,onOpen=null,closeLabel='×'}={}){
+  const root=$('#modalRoot');
+  const wasOpen=Boolean(root.innerHTML);
+  if(!wasOpen){
+    history.pushState({...history.state,mocuiModal:true},'',location.href);
+    modalHistoryActive=true;
+  }
+  root.innerHTML=`<div class="modal-backdrop"><section class="modal ${full?'full':''}"><div class="modal-head"><div class="modal-title">${esc(title)}</div><button class="modal-close ${closeLabel!=='×'?'text-close':''}" type="button" aria-label="返回">${esc(closeLabel)}</button></div><div class="modal-body">${content}</div></section></div>`;
+  $('.modal-close',root).onclick=()=>closeModal();
+  $('.modal-backdrop',root).addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal();});
   if(onOpen) onOpen(root);
 }
-function closeModal(){ $('#modalRoot').innerHTML=''; }
+function closeModal(fromHistory=false){
+  $('#modalRoot').innerHTML='';
+  if(modalHistoryActive&&!fromHistory){
+    modalHistoryActive=false;
+    history.back();
+  }else modalHistoryActive=false;
+}
+window.addEventListener('popstate',()=>{
+  if($('#modalRoot').innerHTML) closeModal(true);
+});
 
 function emptyState(icon,title,text=''){
   return `<div class="empty"><div class="emoji">${icon}</div><strong>${esc(title)}</strong>${text?`<div class="item-meta">${esc(text)}</div>`:''}</div>`;
@@ -601,7 +618,7 @@ async function renderLoanFormModal(){
     </div>
     <div class="loan-step-card"><div class="loan-step-title"><span>3</span> 选择商品与数量</div><button id="loanChooseProducts" type="button" class="btn secondary block">＋ 选择调借商品（可多选）</button><div id="loanItems" style="margin-top:10px">${itemHTML}</div><div id="loanInventorySummary" class="notice ${d.type==='borrow'?'success':'warn'}"></div></div>
     <div class="sticky-actions"><button id="saveLoan" class="btn block" type="submit">保存调借单并同步库存</button></div>
-  </form>`,{full:true,onOpen:()=>{
+  </form>`,{full:true,closeLabel:'← 返回',onOpen:()=>{
     const sync=()=>{d.type=$('#loanType').value;d.person=$('#loanPerson').value.trim();d.date=$('#loanDate').value;d.note=$('#loanNote').value;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)];if(item)item.qty=n($('.loan-qty',el).value);});};
     const renderImages=()=>{$('#loanImageCount').textContent=`已选 ${d.images.length}/12 张`;$('#loanImagePreview').innerHTML=d.images.map((src,idx)=>`<div class="upload-thumb-wrap"><img src="${src}" alt="调借备注图片 ${idx+1}"><button type="button" class="remove-upload-image" data-image-index="${idx}" aria-label="删除图片">×</button></div>`).join('');$$('.remove-upload-image').forEach(btn=>btn.onclick=()=>{d.images.splice(n(btn.dataset.imageIndex),1);renderImages();});};
     const updateInventoryPreview=()=>{sync();const dir=d.type==='borrow'?1:-1;let totalQty=0,invalid=0;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)],after=n(item.stock)+dir*n(item.qty);totalQty+=n(item.qty);const bad=d.type==='lend'&&after<0;if(bad)invalid++;el.classList.toggle('invalid',bad);$('.loan-after-stock',el).textContent=fmtInt(after);$('.loan-after-stock',el).className=`loan-after-stock ${bad?'danger-text':dir>0?'success-text':''}`;$('.loan-stock-hint',el).textContent=d.type==='borrow'?'保存后库存增加':'保存后库存减少';});const summary=$('#loanInventorySummary');if(!d.items.length){summary.className='notice warn';summary.innerHTML='还没有选择商品，保存前必须至少选择 1 件商品。';}else if(invalid){summary.className='notice danger';summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；有 ${invalid} 件商品库存不足，不能保存。`;}else{summary.className=`notice ${d.type==='borrow'?'success':'warn'}`;summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；保存后库存将自动${d.type==='borrow'?'增加':'减少'}。`;}$('#saveLoan').disabled=invalid>0||!d.items.length;};
