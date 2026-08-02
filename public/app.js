@@ -1,9 +1,12 @@
 'use strict';
 
 const DB_NAME = 'mocui_inventory_db';
-const DB_VERSION = 1;
-const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings'];
+const DB_VERSION = 2;
+const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
+const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
+const ROUTE_PARENTS = {'product-detail':'products',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings'};
 let db;
+let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null };
 
 const $ = (s, root=document) => root.querySelector(s);
@@ -47,6 +50,24 @@ async function compressImage(file,maxSide=1280,quality=.78){
   }catch(_){return src;}
 }
 function readFileAsText(file){ return new Promise((resolve,reject)=>{ const r=new FileReader(); r.onload=()=>resolve(r.result); r.onerror=reject; r.readAsText(file,'utf-8'); }); }
+function saveLocalDraft(key,value){ try{localStorage.setItem(key,JSON.stringify(value));}catch(_){/* 图片过大时仍保留当前会话草稿 */} }
+function loadLocalDraft(key){ try{return JSON.parse(localStorage.getItem(key)||'null');}catch(_){return null;} }
+function clearLocalDraft(key){ try{localStorage.removeItem(key);}catch(_){} }
+function auditSafe(value,depth=0){
+  if(depth>5)return '[层级过深]';
+  if(Array.isArray(value))return value.slice(0,20).map(v=>auditSafe(v,depth+1));
+  if(value&&typeof value==='object'){const out={};for(const [k,v] of Object.entries(value)){if(['image','images','signedImages','ownerSignature','borrowerSignature'].includes(k)){out[k]=Array.isArray(v)?`[${v.length}个媒体文件]`:(v?'[媒体文件]':'');continue;}out[k]=auditSafe(v,depth+1);}return out;}
+  if(typeof value==='string'&&value.length>500)return value.slice(0,500)+'…';
+  return value;
+}
+async function writeAudit(action,entityType,entityId,summary,before=null,after=null){
+  if(!db||window.__cloudImporting)return;
+  const record={id:uid('audit'),action,entityType,entityId:String(entityId||''),summary:String(summary||''),before:auditSafe(before),after:auditSafe(after),deviceId:String(window.CloudSync?.deviceId||'').slice(0,80),createdAt:nowISO()};
+  await dbPut('auditLogs',record,true);
+  const rows=await dbAll('auditLogs');
+  if(rows.length>1000){const old=rows.sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt)).slice(0,rows.length-1000);for(const row of old)await dbDelete('auditLogs',row.id,true);}
+  window.CloudSync?.schedule();
+}
 
 function openDB(){
   return new Promise((resolve,reject)=>{
@@ -96,6 +117,7 @@ async function adjustStock(productId, delta, type, refType, refId, note='', crea
   if(after<0) throw new Error(`${p.name} 库存不足，当前库存 ${before}`);
   p.stock=after; p.updatedAt=nowISO(); await dbPut('products',p);
   await dbPut('stockMoves',{id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type,qtyChange:n(delta),beforeStock:before,afterStock:after,refType,refId,note,createdAt});
+  await writeAudit(`stock.${type}`,'product',p.id,`${p.name} 库存 ${fmtInt(before)} → ${fmtInt(after)}`,{stock:before},{stock:after,refType,refId,note});
   return p;
 }
 async function validateStock(items, direction=-1){
@@ -170,6 +192,9 @@ function loanSaleEvents(loan){ return (loan?.saleEvents||[]).filter(e=>e.status!
 const DEFAULT_LEGAL_PROFILE={id:'legalProfile',partyAName:'漠翠珠宝',partyAIdNo:'',partyAPhone:'',partyAAddress:'',defaultDeliveryPlace:'',defaultDisputeCourt:'甲方住所地有管辖权的人民法院',updatedAt:''};
 async function getLegalProfile(){return {...DEFAULT_LEGAL_PROFILE,...((await dbGet('settings','legalProfile'))||{})};}
 function addDaysLocal(value,days=30){const d=value?new Date(value):new Date();d.setDate(d.getDate()+days);return localInputDateTime(d).slice(0,10);}
+function loanDueDate(loan){return loan?.expectedReturnDate||addDaysLocal(loan?.date||loan?.createdAt||nowISO(),30);}
+function loanOverdueDays(loan){if(!loanIsOpen(loan))return 0;const due=startOfDay(loanDueDate(loan)),today=startOfDay(new Date());return today>due?Math.floor((today-due)/86400000):0;}
+function loanDaysToDue(loan){const due=startOfDay(loanDueDate(loan));return Math.ceil((due-startOfDay(new Date()))/86400000);}
 function contractNoFor(loan,index=1){return `MC-${loan.loanNo||loan.id}-${String(index).padStart(2,'0')}`;}
 function contractStatusName(doc){if(doc?.borrowerSignature||doc?.signedImages?.length)return '已有签署/确认凭证';if(doc?.savedAt)return '已保存未签';return '草稿';}
 function safeDateOnly(v){return v?new Date(v).toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}):'____年__月__日';}
@@ -201,7 +226,7 @@ async function openLoanDocumentHub(loanId){
 }
 async function openLoanContractForm(loanId,docType='agreement',docId=''){
   const l=await dbGet('loans',loanId);if(!l)return;const profile=await getLegalProfile(),docs=l.legalDocuments||[],existing=docId?docs.find(x=>x.id===docId):null,index=existing?docs.findIndex(x=>x.id===existing.id)+1:docs.length+1;
-  const doc=existing?JSON.parse(JSON.stringify(existing)):{id:uid('legal'),docType:docType||'agreement',contractNo:contractNoFor(l,index),partyAName:profile.partyAName,partyAIdNo:profile.partyAIdNo,partyAPhone:profile.partyAPhone,partyAAddress:profile.partyAAddress,partyBName:l.person||'',partyBIdNo:'',partyBPhone:'',partyBWechat:'',partyBAddress:'',agreementDate:(l.date||nowISO()).slice(0,10),dueDate:addDaysLocal(l.date||nowISO(),30),deliveryPlace:profile.defaultDeliveryPlace||'',settlementDays:1,lateRateWan:3,disputeCourt:profile.defaultDisputeCourt||'甲方住所地有管辖权的人民法院',extraTerms:'',items:(l.items||[]).map(i=>({productId:i.productId,productName:i.productName,productCode:i.productCode,color:i.color,qty:n(i.qty),liabilityPrice:n(i.salePrice||i.costPrice),productNote:i.productNote||''})),ownerSignature:'',borrowerSignature:'',signedImages:[],generatedAt:nowISO(),savedAt:'',hash:''};
+  const doc=existing?JSON.parse(JSON.stringify(existing)):{id:uid('legal'),docType:docType||'agreement',contractNo:contractNoFor(l,index),partyAName:profile.partyAName,partyAIdNo:profile.partyAIdNo,partyAPhone:profile.partyAPhone,partyAAddress:profile.partyAAddress,partyBName:l.person||'',partyBIdNo:'',partyBPhone:'',partyBWechat:'',partyBAddress:'',agreementDate:(l.date||nowISO()).slice(0,10),dueDate:loanDueDate(l),deliveryPlace:profile.defaultDeliveryPlace||'',settlementDays:1,lateRateWan:3,disputeCourt:profile.defaultDisputeCourt||'甲方住所地有管辖权的人民法院',extraTerms:'',items:(l.items||[]).map(i=>({productId:i.productId,productName:i.productName,productCode:i.productCode,color:i.color,qty:n(i.qty),liabilityPrice:n(i.salePrice||i.costPrice),productNote:i.productNote||''})),ownerSignature:'',borrowerSignature:'',signedImages:[],generatedAt:nowISO(),savedAt:'',hash:''};
   const rows=()=>doc.items.map((i,idx)=>`<div class="contract-item-edit" data-contract-item="${idx}"><div class="item-main"><div class="item-title">${esc(i.productName)}</div><div class="item-meta">${esc(i.productCode||'')} · ${esc(i.color||'')} · 数量 ${fmtInt(i.qty)}</div>${i.productNote?`<div class="loan-product-note">商品备注：${esc(i.productNote)}</div>`:''}</div><div><div class="mini-label">责任价/件</div><input class="mini-input contract-liability" type="number" min="0" step="0.01" value="${n(i.liabilityPrice)}"></div></div>`).join('');
   openModal(existing?'查看/更新合同凭证':'生成合同凭证',`<form id="loanContractForm"><div class="notice">${esc(l.person)} · ${esc(l.loanNo)}<br>建议填写对方可核验的真实姓名、手机号和身份证号/统一社会信用代码。高价值货品优先纸面签字按指印或第三方可靠电子签名。</div><div class="loan-step-card"><div class="loan-step-title"><span>1</span> 双方身份与期限</div><div class="form-row"><div class="form-group"><label class="form-label">甲方真实姓名/主体名称 *</label><input id="partyAName" class="input" value="${esc(doc.partyAName)}" required></div><div class="form-group"><label class="form-label">甲方证件/统一代码</label><input id="partyAIdNo" class="input" value="${esc(doc.partyAIdNo)}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">甲方电话</label><input id="partyAPhone" class="input" value="${esc(doc.partyAPhone)}"></div><div class="form-group"><label class="form-label">甲方地址</label><input id="partyAAddress" class="input" value="${esc(doc.partyAAddress)}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">乙方真实姓名/主体名称 *</label><input id="partyBName" class="input" value="${esc(doc.partyBName)}" required></div><div class="form-group"><label class="form-label">乙方身份证/统一代码</label><input id="partyBIdNo" class="input" value="${esc(doc.partyBIdNo)}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">乙方电话</label><input id="partyBPhone" class="input" value="${esc(doc.partyBPhone)}"></div><div class="form-group"><label class="form-label">乙方微信号</label><input id="partyBWechat" class="input" value="${esc(doc.partyBWechat)}"></div></div><div class="form-group"><label class="form-label">乙方地址</label><input id="partyBAddress" class="input" value="${esc(doc.partyBAddress)}"></div><div class="form-row"><div class="form-group"><label class="form-label">交接日期</label><input id="agreementDate" class="input" type="date" value="${esc(doc.agreementDate)}"></div><div class="form-group"><label class="form-label">最迟归还日期</label><input id="dueDate" class="input" type="date" value="${esc(doc.dueDate)}"></div></div><div class="form-group"><label class="form-label">交接地点</label><input id="deliveryPlace" class="input" value="${esc(doc.deliveryPlace)}"></div></div><div class="loan-step-card"><div class="loan-step-title"><span>2</span> 商品责任价</div><div class="field-help">责任价用于发生无法返还、损坏或擅自处分时确定主张基础，不建议直接使用你的内部成本价；可按双方认可的结算价或合理市场价填写。</div>${rows()}<div id="contractTotal" class="total-box"></div></div><div class="loan-step-card"><div class="loan-step-title"><span>3</span> 结算与争议约定</div><div class="form-row"><div class="form-group"><label class="form-label">售出后几日内结算</label><input id="settlementDays" class="input" type="number" min="0" step="1" value="${n(doc.settlementDays)}"></div><div class="form-group"><label class="form-label">逾期日违约金（万分之）</label><input id="lateRateWan" class="input" type="number" min="0" step="0.1" value="${n(doc.lateRateWan)}"></div></div><div class="form-group"><label class="form-label">争议管辖</label><input id="disputeCourt" class="input" value="${esc(doc.disputeCourt)}"><div class="field-help">约定法院应与争议有实际联系。系统默认使用甲方住所地法院，并保留法定管辖兜底。</div></div><div class="form-group"><label class="form-label">其他约定</label><textarea id="extraTerms" class="textarea">${esc(doc.extraTerms)}</textarea></div></div><div class="loan-step-card"><div class="loan-step-title"><span>4</span> 签名和确认凭证</div><div class="signature-grid"><div><label class="form-label">甲方屏幕手写签名</label><canvas id="ownerSignatureCanvas" class="signature-pad"></canvas><button id="clearOwnerSignature" class="btn secondary small" type="button">清除甲方签名</button></div><div><label class="form-label">乙方屏幕手写签名</label><canvas id="borrowerSignatureCanvas" class="signature-pad"></canvas><button id="clearBorrowerSignature" class="btn secondary small" type="button">清除乙方签名</button></div></div><div class="notice warn" style="margin-top:10px">屏幕手写签名可增强证据，但不当然等同于经身份认证、防篡改的“可靠电子签名”。重要交易建议打印后手写签字并按指印，或使用合规第三方电子签约服务。</div><div class="form-group"><label class="form-label">签字页、按指印照片或微信明确确认截图</label><label class="upload-box loan-upload-box" for="contractEvidenceImages"><strong>＋ 上传确认凭证</strong><span>最多12张，每次保存不会覆盖借调原始图片</span></label><input id="contractEvidenceImages" class="hidden" type="file" accept="image/*" multiple><div id="contractEvidencePreview" class="upload-preview loan-image-preview"></div></div></div><div class="loan-step-card"><div class="loan-step-title"><span>5</span> 合同预览</div><div id="contractPreview" class="contract-preview"></div></div><div class="legal-bottom-actions"><button id="copyWechatConfirm" class="btn secondary" type="button">复制微信确认文案</button><button id="printContract" class="btn secondary" type="button">打印/存为PDF</button><button id="downloadContract" class="btn secondary" type="button">下载HTML副本</button><button class="btn block" type="submit">保存合同快照</button></div></form>`,{full:true,onOpen:()=>{
     const ownerPad=setupSignaturePad($('#ownerSignatureCanvas'),doc.ownerSignature),borrowerPad=setupSignaturePad($('#borrowerSignatureCanvas'),doc.borrowerSignature);
@@ -213,35 +238,58 @@ async function openLoanContractForm(loanId,docType='agreement',docId=''){
     $('#contractEvidenceImages').onchange=async e=>{const room=Math.max(0,12-(doc.signedImages||[]).length);for(const f of [...e.target.files].slice(0,room))(doc.signedImages||(doc.signedImages=[])).push(await compressImage(f,1280,.75));e.target.value='';renderEvidence();};
     $('#copyWechatConfirm').onclick=()=>{sync();copyText(buildWechatConfirmation(doc,l));};$('#printContract').onclick=async()=>{sync();const clone={...doc,generatedAt:doc.generatedAt||nowISO()};const noHash=contractPrintHTML({...clone,hash:''},l),hash=await sha256Text(noHash);clone.hash=hash;openPrintWindow(contractPrintHTML(clone,l));};$('#downloadContract').onclick=async()=>{sync();const clone={...doc,generatedAt:doc.generatedAt||nowISO()};const raw=contractPrintHTML({...clone,hash:''},l);clone.hash=await sha256Text(raw);downloadBlob(contractPrintHTML(clone,l),`${clone.contractNo}_${clone.docType==='transfer'?'调拨交接单':'借调协议'}.html`,'text/html;charset=utf-8');};
     renderEvidence();update();
-    $('#loanContractForm').onsubmit=async e=>{e.preventDefault();sync();if(!doc.partyAName||!doc.partyBName){showToast('请填写双方真实姓名或主体名称');return;}if(!doc.dueDate){showToast('请填写最迟归还日期');return;}doc.generatedAt=doc.generatedAt||nowISO();doc.savedAt=nowISO();const raw=contractPrintHTML({...doc,hash:''},l);doc.hash=await sha256Text(raw);doc.confirmationText=buildWechatConfirmation(doc,l);const current=await dbGet('loans',l.id),arr=current.legalDocuments||[],pos=arr.findIndex(x=>x.id===doc.id);if(pos>=0)arr[pos]=doc;else arr.push(doc);current.legalDocuments=arr;current.updatedAt=nowISO();await dbPut('loans',current);await dbPut('settings',{...profile,id:'legalProfile',partyAName:doc.partyAName,partyAIdNo:doc.partyAIdNo,partyAPhone:doc.partyAPhone,partyAAddress:doc.partyAAddress,defaultDeliveryPlace:doc.deliveryPlace,defaultDisputeCourt:doc.disputeCourt,updatedAt:nowISO()});closeModal();showToast('合同快照已保存，内容校验值已生成');await openLoanDocumentHub(l.id);};
+    $('#loanContractForm').onsubmit=async e=>{e.preventDefault();sync();if(!doc.partyAName||!doc.partyBName){showToast('请填写双方真实姓名或主体名称');return;}if(!doc.dueDate){showToast('请填写最迟归还日期');return;}doc.generatedAt=doc.generatedAt||nowISO();doc.savedAt=nowISO();const raw=contractPrintHTML({...doc,hash:''},l);doc.hash=await sha256Text(raw);doc.confirmationText=buildWechatConfirmation(doc,l);const current=await dbGet('loans',l.id),arr=current.legalDocuments||[],pos=arr.findIndex(x=>x.id===doc.id);if(pos>=0)arr[pos]=doc;else arr.push(doc);current.legalDocuments=arr;current.expectedReturnDate=doc.dueDate||current.expectedReturnDate;current.updatedAt=nowISO();await dbPut('loans',current);await writeAudit('loan.document','loan',current.id,`${doc.contractNo} 合同/凭证已保存`,null,{docType:doc.docType,dueDate:doc.dueDate,hash:doc.hash});await dbPut('settings',{...profile,id:'legalProfile',partyAName:doc.partyAName,partyAIdNo:doc.partyAIdNo,partyAPhone:doc.partyAPhone,partyAAddress:doc.partyAAddress,defaultDeliveryPlace:doc.deliveryPlace,defaultDisputeCourt:doc.disputeCourt,updatedAt:nowISO()});closeModal();showToast('合同快照已保存，内容校验值已生成');await openLoanDocumentHub(l.id);};
   }});
 }
 
 
 function setHeader(title,subtitle='',action=null){
   $('.brand').textContent=title; $('#pageSubtitle').textContent=subtitle;
+  const back=$('#pageBack');const canBack=!MAIN_ROUTES.has(appState.route)&&(routeStack.length>0||ROUTE_PARENTS[appState.route]);
+  if(back){back.classList.toggle('hidden',!canBack);back.onclick=()=>goBack();}
   const btn=$('#topAction'); btn.onclick=null;
   if(action){btn.classList.remove('hidden');btn.textContent=action.label||'＋';btn.onclick=action.onClick;} else btn.classList.add('hidden');
 }
-function setActiveNav(route){
-  $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.route===route||(route.startsWith('product')&&b.dataset.route==='products')||(route.startsWith('sale')&&b.dataset.route==='sale-new')||(route.startsWith('loan')&&b.dataset.route==='loans')));
+function navRouteFor(route){
+  if(route==='dashboard' || route==='sale-new') return 'dashboard';
+  if(route==='products' || route.startsWith('product')) return 'products';
+  if(route==='loans' || route.startsWith('loan')) return 'loans';
+  if(route==='reports') return 'reports';
+  if(route==='more' || ['customers','stocktake','ledger','settings','audit','health','sales'].includes(route)) return 'more';
+  return route;
 }
-async function navigate(route,params={}){ appState.route=route; appState.params=params; setActiveNav(route); await render(); window.scrollTo({top:0,behavior:'instant'}); }
+function setActiveNav(route){
+  const target=navRouteFor(route);
+  $$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.route===target));
+}
+async function navigate(route,params={},options={}){
+  const {reset=false,fromBack=false}=options;
+  if(reset)routeStack=[];else if(!fromBack&&appState.route!==route)routeStack.push({route:appState.route,params:appState.params});
+  appState.route=route; appState.params=params; setActiveNav(route); await render(); window.scrollTo({top:0,behavior:'instant'});
+}
+async function goBack(){
+  const previous=routeStack.pop()||{route:ROUTE_PARENTS[appState.route]||'dashboard',params:{}};
+  await navigate(previous.route,previous.params||{},{fromBack:true});
+}
 
 let modalHistoryActive=false;
-function openModal(title,content,{full=false,onOpen=null,closeLabel='×'}={}){
+let modalCloseGuard=null;
+function openModal(title,content,{full=false,onOpen=null,closeLabel='×',guardClose=null}={}){
   const root=$('#modalRoot');
   const wasOpen=Boolean(root.innerHTML);
   if(!wasOpen){
     history.pushState({...history.state,mocuiModal:true},'',location.href);
     modalHistoryActive=true;
   }
+  modalCloseGuard=guardClose;
   root.innerHTML=`<div class="modal-backdrop"><section class="modal ${full?'full':''}"><div class="modal-head"><div class="modal-title">${esc(title)}</div><button class="modal-close ${closeLabel!=='×'?'text-close':''}" type="button" aria-label="返回">${esc(closeLabel)}</button></div><div class="modal-body">${content}</div></section></div>`;
   $('.modal-close',root).onclick=()=>closeModal();
   $('.modal-backdrop',root).addEventListener('click',e=>{if(e.target.classList.contains('modal-backdrop'))closeModal();});
   if(onOpen) onOpen(root);
 }
 function closeModal(fromHistory=false){
+  if(!fromHistory&&modalCloseGuard&&modalCloseGuard()===false)return;
+  modalCloseGuard=null;
   $('#modalRoot').innerHTML='';
   if(modalHistoryActive&&!fromHistory){
     modalHistoryActive=false;
@@ -264,7 +312,7 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
-    more:renderMore, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings
+    more:renderMore, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
 }
@@ -280,7 +328,8 @@ async function renderDashboard(){
   const inventoryCost=products.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   const sumAmount=rows=>rows.reduce((s,r)=>s+n(r.finalAmount),0);
   const profit=rows=>rows.reduce((s,r)=>s+r.items.reduce((x,i)=>x+(n(i.price)-n(i.costPrice))*n(i.qty),0)-n(r.discountAmount),0);
-  const overdue=loans.filter(l=>loanIsOpen(l)&&daysBetween(l.date||l.createdAt)>30);
+  const overdue=loans.filter(l=>loanOverdueDays(l)>0);
+  const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
   const low=products.filter(p=>n(p.stock)<=1).sort((a,b)=>n(a.stock)-n(b.stock)).slice(0,6);
   $('#main').innerHTML=`
     <div class="grid-2">
@@ -295,7 +344,7 @@ async function renderDashboard(){
       <div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div>
       <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div>
     </div>
-    ${overdue.length?`<div class="section-title danger-text">调借超期提醒 <small>${overdue.length} 单超过30天</small></div><div class="list">${overdue.slice(0,5).map(loanListItem).join('')}</div>`:''}
+    ${(overdue.length||dueSoon.length)?`<div class="section-title ${overdue.length?'danger-text':''}">调借到期提醒 <small>${overdue.length} 单超期 · ${dueSoon.length} 单7天内到期</small></div><div class="list">${[...overdue,...dueSoon.filter(x=>!overdue.includes(x))].slice(0,6).map(loanListItem).join('')}</div>`:''}
     <div class="section-title">库存提醒 <small>库存≤1</small></div>
     ${low.length?`<div class="list">${low.map(productListItem).join('')}</div>`:emptyState('✓','暂无低库存商品')}
     <div class="section-title">快捷操作</div>
@@ -334,27 +383,30 @@ async function renderProducts(){
 
 async function openProductForm(product=null,{copy=false}={}){
   const categories=await dbAll('categories'); const code=copy||!product?await nextProductCode():product.code;
-  const p=product||{};
+  const recovered=!product&&!copy?loadLocalDraft('mocui_product_draft_v1'):null;
+  const p=product||recovered||{};
   openModal(copy?'复制商品':product?'编辑商品':'新增商品',`
     <form id="productForm">
       <div class="form-group"><label class="form-label">商品图片</label><label class="upload-box" for="productImage">点击选择图片<br>建议上传正方形或竖图</label><input id="productImage" type="file" accept="image/*" class="hidden"><div id="productImagePreview" class="upload-preview">${p.image?`<img src="${p.image}" alt="">`:''}</div></div>
       <div class="form-group"><label class="form-label">商品名称 *</label><input class="input" name="name" required value="${esc(p.name||'')}"></div>
-      <div class="form-row"><div class="form-group"><label class="form-label">商品编码</label><input class="input" name="code" value="${esc(code)}"></div><div class="form-group"><label class="form-label">分类</label><select class="select" name="category"><option value="">未分类</option>${categories.map(c=>`<option ${p.category===c.name?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">商品编码</label><input class="input" name="code" value="${esc(p.code||code)}"></div><div class="form-group"><label class="form-label">分类</label><select class="select" name="category"><option value="">未分类</option>${categories.map(c=>`<option ${p.category===c.name?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div></div>
       <div class="form-group"><label class="form-label">商品颜色</label><input class="input" name="color" value="${esc(p.color||'')}" placeholder="如：白色、菠菜绿、晴水色"></div>
       <div class="form-row three"><div class="form-group"><label class="form-label">成本价</label><input class="input" name="costPrice" type="number" min="0" step="0.01" value="${n(p.costPrice)}"></div><div class="form-group"><label class="form-label">销售价</label><input class="input" name="salePrice" type="number" min="0" step="0.01" value="${n(p.salePrice)}"></div><div class="form-group"><label class="form-label">库存</label><input class="input" name="stock" type="number" min="0" step="1" value="${copy?0:n(p.stock)}" ${product&&!copy?'readonly':''}></div></div>
       ${product&&!copy?`<div class="notice warn">编辑商品时库存不可直接改，请使用“盘点”或“入库/出库”，这样库存流水不会丢失。</div>`:''}
       <div class="form-group"><label class="form-label">备注</label><textarea class="textarea" name="note">${esc(p.note||'')}</textarea></div>
       <button class="btn block" type="submit">保存商品</button>
-    </form>`,{onOpen:root=>{
-      let image=p.image||'';
-      $('#productImage',root).onchange=async e=>{const f=e.target.files[0]; if(!f)return; image=await compressImage(f); $('#productImagePreview',root).innerHTML=`<img src="${image}" alt="">`;};
+    </form>`,{guardClose:()=>{if(!window.__mocuiProductDirty)return true;return window.confirm('商品内容尚未保存。确定退出吗？草稿会保留在这台手机。');},onOpen:root=>{
+      let image=p.image||'';window.__mocuiProductDirty=false;
+      let draftTimer=null;const saveDraft=()=>{if(product||copy)return;clearTimeout(draftTimer);draftTimer=setTimeout(()=>{const fd=new FormData($('#productForm',root));saveLocalDraft('mocui_product_draft_v1',{name:String(fd.get('name')||''),code:String(fd.get('code')||''),category:String(fd.get('category')||''),color:String(fd.get('color')||''),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:n(fd.get('stock')),note:String(fd.get('note')||''),image});},250);};
+      $('#productForm',root).addEventListener('input',()=>{window.__mocuiProductDirty=true;saveDraft();});
+      $('#productImage',root).onchange=async e=>{const f=e.target.files[0]; if(!f)return; image=await compressImage(f);window.__mocuiProductDirty=true;saveDraft(); $('#productImagePreview',root).innerHTML=`<img src="${image}" alt="">`;};
       $('#productForm',root).onsubmit=async e=>{
         e.preventDefault(); const fd=new FormData(e.target); const oldStock=n(p.stock), newStock=n(fd.get('stock'));
         const obj={id:copy||!product?uid('prod'):p.id,name:String(fd.get('name')).trim(),code:String(fd.get('code')).trim()||await nextProductCode(),category:String(fd.get('category')),color:String(fd.get('color')).trim(),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:product&&!copy?oldStock:newStock,note:String(fd.get('note')).trim(),image,createdAt:copy||!product?nowISO():p.createdAt,updatedAt:nowISO()};
         if(!obj.name){showToast('请填写商品名称');return;}
-        await dbPut('products',obj);
+        const before=product?auditSafe(product):null;await dbPut('products',obj);
         if((copy||!product)&&obj.stock!==0) await dbPut('stockMoves',{id:uid('move'),productId:obj.id,productCode:obj.code,productName:obj.name,type:'initial',qtyChange:obj.stock,beforeStock:0,afterStock:obj.stock,refType:'product',refId:obj.id,note:'新建商品初始库存',createdAt:nowISO()});
-        closeModal(); showToast('商品已保存'); await navigate('products');
+        await writeAudit(product?'product.update':copy?'product.copy':'product.create','product',obj.id,`${obj.name} 已保存`,before,obj);clearLocalDraft('mocui_product_draft_v1');window.__mocuiProductDirty=false;closeModal(); showToast('商品已保存'); await navigate('products');
       };
     }});
 }
@@ -424,12 +476,12 @@ async function renderProductDetail(){
   $$('#productRange button').forEach(b=>b.onclick=()=>{if(b.dataset.range==='custom'){openDateRangePicker((s,e)=>drawSales('custom',s,e));return;}$$('#productRange button').forEach(x=>x.classList.remove('active'));b.classList.add('active');drawSales(b.dataset.range);});
   $('#productSale').onclick=()=>{appState.saleDraft=null;navigate('sale-new',{productId:p.id});}; $('#productEdit').onclick=()=>openProductForm(p); $('#productStock').onclick=()=>openSingleStocktake(p);
 }
-function moveTypeName(type){return ({initial:'初始入库',sale:'销售出库',sale_cancel:'撤销回库',sale_restore:'恢复销售',stocktake:'盘点调整',stock_in:'采购入库',stock_out:'手工出库',loan_borrow:'调入库存',loan_lend:'借出库存',loan_return:'调借归还',loan_sale:'借调售出',loan_sale_cancel:'撤销借调售出',loan_sale_restore:'恢复借调售出'}[type]||type);}
+function moveTypeName(type){return ({initial:'初始入库',sale:'销售出库',sale_cancel:'撤销回库',sale_restore:'恢复销售',stocktake:'盘点调整',stock_in:'采购入库',stock_out:'手工出库',loan_borrow:'调入库存',loan_lend:'借出库存',loan_return:'调借归还',loan_sale:'借调售出',loan_sale_cancel:'撤销借调售出',loan_sale_restore:'恢复借调售出',ledger_reconcile:'流水校正'}[type]||type);}
 function openProductActions(p){
   openModal('商品操作',`<div class="grid-2"><button id="actCopy" class="btn secondary">复制商品</button><button id="actEdit" class="btn secondary">编辑商品</button><button id="actIn" class="btn secondary">商品入库</button><button id="actOut" class="btn secondary">商品出库</button><button id="actDelete" class="btn danger">删除商品</button></div>`,{onOpen:()=>{
     $('#actCopy').onclick=()=>{closeModal();openProductForm(p,{copy:true});}; $('#actEdit').onclick=()=>{closeModal();openProductForm(p);};
     $('#actIn').onclick=()=>{closeModal();openManualStock(p,1);}; $('#actOut').onclick=()=>{closeModal();openManualStock(p,-1);};
-    $('#actDelete').onclick=async()=>{const [sales,loans]=await Promise.all([dbAll('sales'),dbAll('loans')]);const used=sales.some(s=>s.items.some(i=>i.productId===p.id))||loans.some(l=>l.items.some(i=>i.productId===p.id));if(used){showToast('该商品已有销售或调借记录，不能删除，可把库存盘点为0并保留历史');return;}if(await confirmDialog('确定删除这个尚未发生业务的商品？')){await dbDelete('products',p.id);closeModal();showToast('商品已删除');navigate('products');}};
+    $('#actDelete').onclick=async()=>{const [sales,loans]=await Promise.all([dbAll('sales'),dbAll('loans')]);const used=sales.some(s=>s.items.some(i=>i.productId===p.id))||loans.some(l=>l.items.some(i=>i.productId===p.id));if(used){showToast('该商品已有销售或调借记录，不能删除，可把库存盘点为0并保留历史');return;}if(await confirmDialog('确定删除这个尚未发生业务的商品？')){await writeAudit('product.delete','product',p.id,`${p.name} 已删除`,p,null);await dbDelete('products',p.id);closeModal();showToast('商品已删除');navigate('products');}};
   }});
 }
 function openManualStock(p,direction){
@@ -507,7 +559,7 @@ async function saveSale(){
     const createdAt=new Date(d.createdAt).toISOString();
     for(const i of d.items) await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
     const sale={id,orderNo,customerId,customerName,items:d.items.map(i=>({...i,qty:n(i.qty),price:n(i.price),costPrice:n(i.costPrice)})),subtotal:totals.subtotal,discountType:d.discountType,discountValue:n(d.discountValue),discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:d.received===''?totals.finalAmount:n(d.received),note:d.note,status:'active',createdAt,cancelledAt:null,updatedAt:nowISO()};
-    await dbPut('sales',sale); appState.saleDraft=null; showToast(`开单成功：${orderNo}`); navigate('sales',{highlight:id});
+    await dbPut('sales',sale);await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale); appState.saleDraft=null; showToast(`开单成功：${orderNo}`); navigate('sales',{highlight:id});
   }catch(err){showToast(err.message);}
 }
 
@@ -539,7 +591,7 @@ async function cancelSale(id){
         }
       }else await adjustStock(i.productId,n(i.qty),'sale_cancel','sale',s.id,`撤销销售单 ${s.orderNo}`);
     }
-    s.status='cancelled';s.cancelledAt=nowISO();s.updatedAt=nowISO();await dbPut('sales',s);showToast('销售单已撤销，相关库存和借调记录已同步');renderSales();
+    s.status='cancelled';s.cancelledAt=nowISO();s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.cancel','sale',s.id,`${s.orderNo} 已撤销`,null,{status:s.status,cancelledAt:s.cancelledAt});showToast('销售单已撤销，相关库存和借调记录已同步');renderSales();
   }catch(err){showToast(err.message);}
 }
 async function restoreSale(id){
@@ -561,7 +613,7 @@ async function restoreSale(id){
         else await recordStockReference(i.productId,'loan_sale_restore','sale',s.id,`恢复借调售出 ${s.orderNo}，借出时库存已扣减`);
       }else await adjustStock(i.productId,-n(i.qty),'sale_restore','sale',s.id,`恢复销售单 ${s.orderNo}`);
     }
-    s.status='active';s.cancelledAt=null;s.updatedAt=nowISO();await dbPut('sales',s);showToast('销售单已恢复，借调、库存和统计已重新联通');renderSales();
+    s.status='active';s.cancelledAt=null;s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.restore','sale',s.id,`${s.orderNo} 已恢复`,null,{status:s.status,updatedAt:s.updatedAt});showToast('销售单已恢复，借调、库存和统计已重新联通');renderSales();
   }catch(err){showToast(err.message);}
 }
 
@@ -570,20 +622,23 @@ async function duplicateSale(id){
 }
 
 function loanListItem(l){
-  const open=loanIsOpen(l),overdue=open&&daysBetween(l.date||l.createdAt)>30,partial=loanIsPartial(l),remaining=loanRemainingQty(l),total=(l.items||[]).reduce((s,i)=>s+n(i.qty),0),sold=loanSoldTotal(l),returned=loanReturnedTotal(l),resolution=loanResolutionStatus(l);
-  const state=open?(overdue?`超期${daysBetween(l.date||l.createdAt)-30}天`:partial?'部分处理':'借调中'):(resolution==='sold'?'已全部售出':resolution==='completed'?'已完成':'已全部归还');
-  const badge=!open?'success':overdue?'danger':partial?'partial':'warn';
-  return `<div class="list-item clickable ${overdue?'overdue':''}" data-loan-id="${l.id}"><div class="item-main"><div class="item-title">${esc(l.person)} · ${l.type==='borrow'?'调入/借入':'借出'}</div><div class="item-meta">${fmtDateTime(l.date||l.createdAt)} · ${(l.items||[]).length} 种商品 · 原借 ${fmtInt(total)} 件${open?` · 未处理 ${fmtInt(remaining)} 件`:''}</div><div class="item-meta">已还 ${fmtInt(returned)} · 已售 ${fmtInt(sold)} · ${esc(l.note||'无备注')}</div></div><div class="item-right"><span class="badge ${badge}">${state}</span></div></div>`;
+  const open=loanIsOpen(l),overdueDays=loanOverdueDays(l),overdue=overdueDays>0,daysToDue=loanDaysToDue(l),partial=loanIsPartial(l),remaining=loanRemainingQty(l),total=(l.items||[]).reduce((s,i)=>s+n(i.qty),0),sold=loanSoldTotal(l),returned=loanReturnedTotal(l),resolution=loanResolutionStatus(l);
+  const state=open?(overdue?`超期${overdueDays}天`:daysToDue<=7?`${Math.max(0,daysToDue)}天后到期`:partial?'部分处理':'借调中'):(resolution==='sold'?'已全部售出':resolution==='completed'?'已完成':'已全部归还');
+  const badge=!open?'success':overdue?'danger':daysToDue<=7?'warn':partial?'partial':'warn';
+  return `<div class="list-item clickable ${overdue?'overdue':''}" data-loan-id="${l.id}"><div class="item-main"><div class="item-title">${esc(l.person)} · ${l.type==='borrow'?'调入/借入':'借出'}</div><div class="item-meta">${fmtDateTime(l.date||l.createdAt)} · 预计归还 ${fmtDate(loanDueDate(l))} · ${(l.items||[]).length} 种商品 · 原借 ${fmtInt(total)} 件${open?` · 未处理 ${fmtInt(remaining)} 件`:''}</div><div class="item-meta">已还 ${fmtInt(returned)} · 已售 ${fmtInt(sold)} · ${esc(l.note||'无备注')}</div></div><div class="item-right"><span class="badge ${badge}">${state}</span></div></div>`;
 }
 async function renderLoans(){
   setHeader('调借货管理','连续借货、多次归还、每次图片留底',{label:'＋',onClick:()=>openLoanForm()});
   const loans=(await dbAll('loans')).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const openRows=loans.filter(loanIsOpen);
-  $('#main').innerHTML=`<div class="grid-3"><div class="metric compact"><div class="label">未处理单</div><div class="value">${openRows.length}</div></div><div class="metric compact"><div class="label">部分处理</div><div class="value">${openRows.filter(loanIsPartial).length}</div></div><div class="metric compact"><div class="label">超30天</div><div class="value danger-text">${openRows.filter(l=>daysBetween(l.date)>30).length}</div></div></div><div class="segment" id="loanStatus" style="margin-top:12px"><button class="active" data-status="all">全部</button><button data-status="active">未处理</button><button data-status="partial">部分处理</button><button data-status="returned">已完成</button><button data-status="overdue">超期</button></div><div id="loanList" class="list"></div>`;
-  let status='all'; const draw=()=>{const rows=loans.filter(l=>status==='all'||(status==='active'?loanIsOpen(l):status==='partial'?loanIsPartial(l):status==='returned'?!loanIsOpen(l):status==='overdue'?loanIsOpen(l)&&daysBetween(l.date)>30:false));$('#loanList').innerHTML=rows.length?rows.map(loanListItem).join(''):emptyState('⇄','暂无调借记录');$$('[data-loan-id]').forEach(el=>el.onclick=()=>openLoanDetail(el.dataset.loanId));};draw();$$('#loanStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#loanStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
+  $('#main').innerHTML=`<div class="grid-3"><div class="metric compact"><div class="label">未处理单</div><div class="value">${openRows.length}</div></div><div class="metric compact"><div class="label">部分处理</div><div class="value">${openRows.filter(loanIsPartial).length}</div></div><div class="metric compact"><div class="label">已超期</div><div class="value danger-text">${openRows.filter(l=>loanOverdueDays(l)>0).length}</div></div></div><div class="segment" id="loanStatus" style="margin-top:12px"><button class="active" data-status="all">全部</button><button data-status="active">未处理</button><button data-status="partial">部分处理</button><button data-status="returned">已完成</button><button data-status="overdue">超期</button></div><div id="loanList" class="list"></div>`;
+  let status='all'; const draw=()=>{const rows=loans.filter(l=>status==='all'||(status==='active'?loanIsOpen(l):status==='partial'?loanIsPartial(l):status==='returned'?!loanIsOpen(l):status==='overdue'?loanOverdueDays(l)>0:false));$('#loanList').innerHTML=rows.length?rows.map(loanListItem).join(''):emptyState('⇄','暂无调借记录');$$('[data-loan-id]').forEach(el=>el.onclick=()=>openLoanDetail(el.dataset.loanId));};draw();$$('#loanStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#loanStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
 }
 async function openLoanForm(){
-  appState.loanDraft={type:'lend',person:'',date:localInputDateTime(),note:'',images:[],items:[]};
+  const saved=loadLocalDraft('mocui_loan_draft_v1');
+  if(!appState.loanDraft&&saved){const resume=window.confirm('检测到上次未保存的借调草稿。确定继续填写，取消则新建空白借调单。');appState.loanDraft=resume?saved:null;if(!resume)clearLocalDraft('mocui_loan_draft_v1');}
+  if(!appState.loanDraft)appState.loanDraft={type:'lend',person:'',date:localInputDateTime(),expectedReturnDate:addDaysLocal(nowISO(),30),note:'',images:[],items:[]};
+  appState.loanDraft.expectedReturnDate=appState.loanDraft.expectedReturnDate||addDaysLocal(appState.loanDraft.date||nowISO(),30);
   await renderLoanFormModal();
 }
 async function renderLoanFormModal(){
@@ -610,7 +665,7 @@ async function renderLoanFormModal(){
       <div class="form-group"><label class="form-label">调借类型</label><div class="loan-type-switch"><button type="button" data-loan-type="lend" class="${d.type==='lend'?'active':''}">借出 · 库存减少</button><button type="button" data-loan-type="borrow" class="${d.type==='borrow'?'active':''}">调入/借入 · 库存增加</button></div><input id="loanType" type="hidden" value="${esc(d.type)}"></div>
       <div class="form-group autocomplete"><label class="form-label">调借人姓名 *</label><input id="loanPerson" class="input" value="${esc(d.person)}" placeholder="输入一个字自动匹配历史借调人" required><div id="loanPersonSuggestions" class="autocomplete-list hidden"></div><div class="field-help">选择历史姓名后，会直接显示这个人所有尚未归还或售出的记录。</div></div>
       <div id="loanPersonOutstanding"></div>
-      <div class="form-group"><label class="form-label">调借日期和时间</label><input id="loanDate" class="input" type="datetime-local" value="${esc(d.date)}"><div class="field-help">可以补录以前记录，也可以修改具体时间。</div></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">调借日期和时间</label><input id="loanDate" class="input" type="datetime-local" value="${esc(d.date)}"><div class="field-help">可以补录以前记录。</div></div><div class="form-group"><label class="form-label">预计归还日期</label><input id="loanExpectedReturnDate" class="input" type="date" value="${esc(d.expectedReturnDate||addDaysLocal(d.date||nowISO(),30))}"><div class="field-help">首页会在到期前7天提醒。</div></div></div>
     </div>
     <div class="loan-step-card"><div class="loan-step-title"><span>2</span> 借货图片与文字备注</div>
       <div class="form-group"><label class="form-label">图片备注</label><label class="upload-box loan-upload-box" for="loanImages"><strong>＋ 从相册选择微信截图或拿货照片</strong><span>这是本次借货的原始凭证，支持多选，最多 12 张</span></label><input id="loanImages" class="hidden" type="file" accept="image/*" multiple><div class="upload-meta"><span id="loanImageCount">已选 ${d.images.length}/12 张</span><span>图片会自动压缩</span></div><div id="loanImagePreview" class="upload-preview loan-image-preview"></div></div>
@@ -619,7 +674,7 @@ async function renderLoanFormModal(){
     <div class="loan-step-card"><div class="loan-step-title"><span>3</span> 选择商品与数量</div><button id="loanChooseProducts" type="button" class="btn secondary block">＋ 选择调借商品（可多选）</button><div id="loanItems" style="margin-top:10px">${itemHTML}</div><div id="loanInventorySummary" class="notice ${d.type==='borrow'?'success':'warn'}"></div></div>
     <div class="sticky-actions"><button id="saveLoan" class="btn block" type="submit">保存调借单并同步库存</button></div>
   </form>`,{full:true,closeLabel:'← 返回',onOpen:()=>{
-    const sync=()=>{d.type=$('#loanType').value;d.person=$('#loanPerson').value.trim();d.date=$('#loanDate').value;d.note=$('#loanNote').value;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)];if(item)item.qty=n($('.loan-qty',el).value);});};
+    const sync=()=>{d.type=$('#loanType').value;d.person=$('#loanPerson').value.trim();d.date=$('#loanDate').value;d.expectedReturnDate=$('#loanExpectedReturnDate').value;d.note=$('#loanNote').value;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)];if(item)item.qty=n($('.loan-qty',el).value);});const compact={...d,images:[],items:d.items.map(i=>({...i,image:''}))};saveLocalDraft('mocui_loan_draft_v1',compact);};
     const renderImages=()=>{$('#loanImageCount').textContent=`已选 ${d.images.length}/12 张`;$('#loanImagePreview').innerHTML=d.images.map((src,idx)=>`<div class="upload-thumb-wrap"><img src="${src}" alt="调借备注图片 ${idx+1}"><button type="button" class="remove-upload-image" data-image-index="${idx}" aria-label="删除图片">×</button></div>`).join('');$$('.remove-upload-image').forEach(btn=>btn.onclick=()=>{d.images.splice(n(btn.dataset.imageIndex),1);renderImages();});};
     const updateInventoryPreview=()=>{sync();const dir=d.type==='borrow'?1:-1;let totalQty=0,invalid=0;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)],after=n(item.stock)+dir*n(item.qty);totalQty+=n(item.qty);const bad=d.type==='lend'&&after<0;if(bad)invalid++;el.classList.toggle('invalid',bad);$('.loan-after-stock',el).textContent=fmtInt(after);$('.loan-after-stock',el).className=`loan-after-stock ${bad?'danger-text':dir>0?'success-text':''}`;$('.loan-stock-hint',el).textContent=d.type==='borrow'?'保存后库存增加':'保存后库存减少';});const summary=$('#loanInventorySummary');if(!d.items.length){summary.className='notice warn';summary.innerHTML='还没有选择商品，保存前必须至少选择 1 件商品。';}else if(invalid){summary.className='notice danger';summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；有 ${invalid} 件商品库存不足，不能保存。`;}else{summary.className=`notice ${d.type==='borrow'?'success':'warn'}`;summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；保存后库存将自动${d.type==='borrow'?'增加':'减少'}。`;}$('#saveLoan').disabled=invalid>0||!d.items.length;};
     const drawOutstanding=()=>{const name=$('#loanPerson').value.trim();const rows=name?history.filter(x=>loanIsOpen(x)&&String(x.person||'').trim()===name):[];const root=$('#loanPersonOutstanding');if(!rows.length){root.innerHTML='';return;}root.innerHTML=`<div class="existing-loans-panel"><div class="existing-loans-head"><strong>${esc(name)} 未完成记录</strong><span>${rows.length} 单 · ${fmtInt(rows.reduce((sum,l)=>sum+loanRemainingQty(l),0))} 件未处理</span></div>${rows.map(l=>`<div class="existing-loan-card"><div class="existing-loan-top"><div><strong>${esc(l.loanNo)}</strong><div class="item-meta">${fmtDateTime(l.date)} · ${loanIsPartial(l)?'已有部分归还/售出':'尚未处理'}</div></div><button type="button" class="btn small secondary outstanding-detail" data-id="${l.id}">查看/处理</button></div><div class="existing-loan-items">${l.items.filter(i=>loanItemRemaining(l,i)>0).map(i=>`<span>${esc(i.productName)} × ${fmtInt(loanItemRemaining(l,i))}</span>`).join('')}</div><div class="item-meta">备注：${esc(l.note||'无')} · 还货 ${(l.returns||[]).length} 次 · 售出 ${loanSaleEvents(l).length} 次</div>${l.images?.length?`<div class="mini-image-strip">${l.images.slice(0,4).map(src=>`<img src="${src}" alt="">`).join('')}${l.images.length>4?`<span>+${l.images.length-4}</span>`:''}</div>`:''}</div>`).join('')}</div>`;$$('.outstanding-detail',root).forEach(btn=>btn.onclick=()=>{sync();openLoanDetail(btn.dataset.id);});};
@@ -632,20 +687,20 @@ async function renderLoanFormModal(){
     $$('.loan-qty').forEach(input=>input.oninput=updateInventoryPreview);
     $('#loanImages').onchange=async e=>{const files=[...e.target.files],room=Math.max(0,12-d.images.length);if(!room){showToast('最多只能上传 12 张图片');e.target.value='';return;}for(const file of files.slice(0,room))d.images.push(await compressImage(file,1080,.70));if(files.length>room)showToast(`只添加前 ${room} 张，最多 12 张`);e.target.value='';renderImages();};
     renderImages();updateInventoryPreview();drawOutstanding();
-    $('#loanForm').onsubmit=async e=>{e.preventDefault();sync();if(!d.person){showToast('请填写调借人姓名');personInput.focus();return;}if(!d.date||Number.isNaN(new Date(d.date).getTime())){showToast('请选择有效的调借时间');return;}if(!d.items.length){showToast('请选择调借商品');return;}if(d.items.some(i=>n(i.qty)<=0)){showToast('调借数量必须大于0');return;}try{if(d.type==='lend')await validateStock(d.items,-1);const id=uid('loan'),loanNo=await nextLoanNo(),createdAt=new Date(d.date).toISOString();for(const i of d.items)await adjustStock(i.productId,(d.type==='borrow'?1:-1)*n(i.qty),d.type==='borrow'?'loan_borrow':'loan_lend','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,createdAt);await dbPut('loans',{id,loanNo,type:d.type,person:d.person,date:createdAt,note:d.note,images:d.images,items:d.items.map(i=>({...i,qty:n(i.qty),returnedQty:0,soldQty:0})),returns:[],saleEvents:[],status:'active',returnedAt:null,createdAt:nowISO(),updatedAt:nowISO()});closeModal();appState.loanDraft=null;showToast('调借单已保存，库存已同步');navigate('loans');}catch(err){showToast(err.message);}};
+    $('#loanForm').onsubmit=async e=>{e.preventDefault();sync();if(!d.person){showToast('请填写调借人姓名');personInput.focus();return;}if(!d.date||Number.isNaN(new Date(d.date).getTime())){showToast('请选择有效的调借时间');return;}if(!d.items.length){showToast('请选择调借商品');return;}if(d.items.some(i=>n(i.qty)<=0)){showToast('调借数量必须大于0');return;}try{if(d.type==='lend')await validateStock(d.items,-1);const id=uid('loan'),loanNo=await nextLoanNo(),createdAt=new Date(d.date).toISOString();for(const i of d.items)await adjustStock(i.productId,(d.type==='borrow'?1:-1)*n(i.qty),d.type==='borrow'?'loan_borrow':'loan_lend','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,createdAt);const loan={id,loanNo,type:d.type,person:d.person,date:createdAt,expectedReturnDate:d.expectedReturnDate||addDaysLocal(createdAt,30),note:d.note,images:d.images,items:d.items.map(i=>({...i,qty:n(i.qty),returnedQty:0,soldQty:0})),returns:[],saleEvents:[],status:'active',returnedAt:null,createdAt:nowISO(),updatedAt:nowISO()};await dbPut('loans',loan);await writeAudit('loan.create','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,null,loan);clearLocalDraft('mocui_loan_draft_v1');closeModal();appState.loanDraft=null;showToast('调借单已保存，库存已同步');navigate('loans');}catch(err){showToast(err.message);}};
   }});
 }
 async function openLoanDetail(idOrLoan){
   const l=typeof idOrLoan==='string'?await dbGet('loans',idOrLoan):idOrLoan;if(!l)return;
-  const open=loanIsOpen(l),overdue=open&&daysBetween(l.date)>30,partial=loanIsPartial(l),returnEvents=loanReturnEvents(l),saleEvents=loanSaleEvents(l),remaining=loanRemainingQty(l),resolution=loanResolutionStatus(l);
-  const state=open?(partial?'已有归还或售出，仍有商品未处理':overdue?`已超过30天，当前超期 ${daysBetween(l.date)-30} 天`:'调借进行中'):(resolution==='sold'?'所有商品已售出':resolution==='completed'?'所有商品已处理完成':'所有商品已归还');
+  const open=loanIsOpen(l),overdueDays=loanOverdueDays(l),overdue=overdueDays>0,partial=loanIsPartial(l),returnEvents=loanReturnEvents(l),saleEvents=loanSaleEvents(l),remaining=loanRemainingQty(l),resolution=loanResolutionStatus(l);
+  const state=open?(partial?'已有归还或售出，仍有商品未处理':overdue?`已超过预计归还日期，当前超期 ${overdueDays} 天`:'调借进行中'):(resolution==='sold'?'所有商品已售出':resolution==='completed'?'所有商品已处理完成':'所有商品已归还');
   const productsHTML=(l.items||[]).map(i=>{const returned=loanItemReturnedQty(l,i),sold=loanItemSoldQty(l,i),left=loanItemRemaining(l,i);const doneLabel=left>0?'':sold>=n(i.qty)?'已售出':returned>=n(i.qty)?'已归还':'已完成';return `<div class="return-product-row ${left<=0?'done':''}">${i.image?`<img class="loan-thumb" src="${i.image}" alt="">`:`<div class="loan-thumb placeholder">玉</div>`}<div class="item-main"><div class="item-title">${esc(i.productName)}</div><div class="item-meta">${esc(i.productCode||'')} · ${esc(i.color||'')}</div>${i.productNote?`<div class="loan-product-note">商品备注：${esc(i.productNote)}</div>`:''}<div class="return-progress"><span>借调 ${fmtInt(i.qty)}</span><span>已还 ${fmtInt(returned)}</span><span class="sold-text">已售 ${fmtInt(sold)}</span><strong>未处理 ${fmtInt(left)}</strong></div></div><div class="item-right">${left>0?`<div class="loan-item-actions"><button type="button" class="btn small success return-one" data-product-id="${i.productId}">归还</button><button type="button" class="btn small loan-sell sell-one" data-product-id="${i.productId}">售出</button></div>`:`<span class="badge success">${doneLabel}</span>`}</div></div>`;}).join('');
   const originalImages=l.images?.length?`<div class="evidence-gallery">${l.images.map((src,idx)=>`<div><img src="${src}" alt="借货凭证 ${idx+1}"><span>借货图 ${idx+1}</span></div>`).join('')}</div>`:`<div class="notice">本次借货没有上传图片凭证。</div>`;
   const timeline=[...returnEvents.map((event,idx)=>({...event,eventType:'return',label:`第 ${idx+1} 次还货`})),...saleEvents.map(event=>({...event,eventType:'sale',label:`售出 · ${event.orderNo||''}`}))].sort((a,b)=>new Date(a.date||a.createdAt)-new Date(b.date||b.createdAt));
   const eventsHTML=timeline.length?timeline.map((event,idx)=>`<div class="return-event ${event.eventType==='sale'?'sale-event':''}"><div class="return-event-head"><span class="return-event-index">${event.eventType==='sale'?'售':idx+1}</span><div><strong>${esc(event.label)}</strong><div class="item-meta">${fmtDateTime(event.date||event.createdAt)}${event.customerName?` · 客户 ${esc(event.customerName)}`:''}</div></div></div><div class="return-event-items">${(event.items||[]).map(i=>`<span>${esc(i.productName||'商品')} × ${fmtInt(i.qty)}</span>`).join('')}</div><div class="return-event-note">${esc(event.note||event.itemNote||'无文字备注')}</div>${event.eventType==='return'?(event.images?.length?`<div class="evidence-gallery compact">${event.images.map((src,j)=>`<div><img src="${src}" alt="还货图片 ${j+1}"><span>还货图 ${j+1}</span></div>`).join('')}</div>`:'<div class="item-meta">本次未上传还货图片</div>'):`<button class="btn small secondary open-linked-sale" data-sale-id="${event.saleId||''}">查看销售单 ${esc(event.orderNo||'')}</button>`}</div>`).join(''):emptyState('＋','还没有流转记录','每一次还货和借调售出都会自动留在这里');
   openModal(`调借单 ${l.loanNo}`,`<div class="notice ${!open?'success':overdue?'danger':'warn'}">${state}${open?` · 还有 ${fmtInt(remaining)} 件未处理`:''}</div>
     <div class="grid-2"><div class="metric compact"><div class="label">调借人</div><div class="value" style="font-size:14px">${esc(l.person)}</div></div><div class="metric compact"><div class="label">类型</div><div class="value" style="font-size:14px">${l.type==='borrow'?'调入/借入':'借出'}</div></div></div>
-    <div class="loan-info-head"><div class="section-title">借调信息与原始图片</div><button id="loanEvidenceMore" class="loan-evidence-corner" type="button">··· 凭证</button></div><div class="notice">借调时间：${fmtDateTime(l.date)}<br>文字备注：${esc(l.note||'无')}${(l.legalDocuments||[]).length?`<br><span class="linked-source-tag">已保存 ${(l.legalDocuments||[]).length} 份合同/交接凭证</span>`:''}</div>${originalImages}
+    <div class="loan-info-head"><div class="section-title">借调信息与原始图片</div><button id="loanEvidenceMore" class="loan-evidence-corner" type="button">··· 凭证</button></div><div class="notice">借调时间：${fmtDateTime(l.date)}<br>预计归还：${fmtDate(loanDueDate(l))}<br>文字备注：${esc(l.note||'无')}${(l.legalDocuments||[]).length?`<br><span class="linked-source-tag">已保存 ${(l.legalDocuments||[]).length} 份合同/交接凭证</span>`:''}</div>${originalImages}
     <div class="section-title">借调商品 <small>归还、售出均在商品后操作</small></div><div class="return-product-list">${productsHTML}</div>
     ${open?`<div class="return-action-grid"><button id="returnAll" class="btn success block">全部还货</button><button id="returnPartial" class="btn secondary block">部分还货</button></div>`:''}
     <div class="section-title">流转记录 <small>还货 ${returnEvents.length} 次 · 售出 ${saleEvents.length} 次</small></div><div class="return-history">${eventsHTML}</div>
@@ -681,8 +736,8 @@ async function openLoanSaleForm(loanId,productId){
       const saleId=uid('sale'),eventId=uid('loan_sale_event'),orderNo=await nextOrderNo(),createdAt=new Date(draft.date).toISOString();const totals=calcSaleTotals({items:[{qty:draft.qty,price:draft.price}],discountType:draft.discountType,discountValue:draft.discountValue});
       if(currentLoan.type==='borrow')await adjustStock(productId,-draft.qty,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt);else await recordStockReference(productId,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}；借出时库存已扣减，本次不重复扣减`,createdAt);
       const saleItem={productId:p.id,productName:p.name,productCode:p.code,color:currentItem.color||p.color,qty:draft.qty,price:draft.price,costPrice:n(currentItem.costPrice||p.costPrice),image:currentItem.image||p.image,stock:n(p.stock),productNote:currentItem.productNote||p.note||'',itemNote:draft.itemNote,fromLoan:true,loanId:currentLoan.id,loanNo:currentLoan.loanNo,loanPerson:currentLoan.person,loanType:currentLoan.type,loanSaleEventId:eventId};
-      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);
-      currentLoan.items=(currentLoan.items||[]).map(x=>x.productId===productId?{...x,soldQty:loanItemSoldQty(currentLoan,x)+draft.qty}:x);currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,itemNote:draft.itemNote,status:'active',items:[{productId:p.id,productName:p.name,productCode:p.code,color:saleItem.color,qty:draft.qty,price:draft.price}],createdAt:nowISO()}];refreshLoanStatus(currentLoan);await dbPut('loans',currentLoan);
+      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);await writeAudit('sale.loan_create','sale',sale.id,`${orderNo} · 来源 ${currentLoan.loanNo}`,null,sale);
+      currentLoan.items=(currentLoan.items||[]).map(x=>x.productId===productId?{...x,soldQty:loanItemSoldQty(currentLoan,x)+draft.qty}:x);currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,itemNote:draft.itemNote,status:'active',items:[{productId:p.id,productName:p.name,productCode:p.code,color:saleItem.color,qty:draft.qty,price:draft.price}],createdAt:nowISO()}];refreshLoanStatus(currentLoan);await dbPut('loans',currentLoan);await writeAudit('loan.sale','loan',currentLoan.id,`${currentLoan.loanNo} 售出 ${p.name} × ${fmtInt(draft.qty)}`,null,{saleId,orderNo,productId,qty:draft.qty});
       closeModal();showToast(`已售出并生成销售单 ${orderNo}`);await openLoanDetail(currentLoan.id);
     }catch(err){showToast(err.message);}};
   }});
@@ -709,7 +764,7 @@ async function openLoanReturnForm(loanId,productId=null,all=false,returnToDraft=
       for(const i of items)await adjustStock(i.productId,(l.type==='borrow'?-1:1)*n(i.qty),'loan_return','loan_return',eventId,`${l.person} 第${eventNo}次归还 ${l.loanNo}`,eventDate);
       l.items=(l.items||[]).map(item=>{const back=items.find(x=>x.productId===item.productId);return {...item,returnedQty:loanItemReturnedQty(l,item)+n(back?.qty)};});
       l.returns=[...(l.returns||[]),{id:eventId,date:eventDate,note:draft.note,images:draft.images,items,createdAt:nowISO()}];
-      refreshLoanStatus(l);if(l.status==='returned')l.returnedAt=eventDate;await dbPut('loans',l);const finished=!loanIsOpen(l);closeModal();showToast(finished?'本张调借单已处理完成，库存已同步':'本次还货已保存，剩余继续挂账');if(returnToDraft&&appState.loanDraft)await renderLoanFormModal();else await openLoanDetail(l.id);
+      refreshLoanStatus(l);if(l.status==='returned')l.returnedAt=eventDate;await dbPut('loans',l);await writeAudit('loan.return','loan',l.id,`${l.loanNo} 本次归还 ${fmtInt(items.reduce((sum,x)=>sum+n(x.qty),0))} 件`,null,{eventId,date:eventDate,items});const finished=!loanIsOpen(l);closeModal();showToast(finished?'本张调借单已处理完成，库存已同步':'本次还货已保存，剩余继续挂账');if(returnToDraft&&appState.loanDraft)await renderLoanFormModal();else await openLoanDetail(l.id);
     }catch(err){showToast(err.message);}};
   }});
 }
@@ -744,7 +799,7 @@ function exportSalesCSV(rows){
 
 async function renderMore(){
   setHeader('更多功能','客户、盘点、流水、备份');
-  const items=[['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['settings','⚙','数据与设置','备份、恢复、清空测试数据']];
+  const items=[['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
   $('#main').innerHTML=`<div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div><div class="notice warn" style="margin-top:12px">当前版本为手机本地数据库版。请定期在“数据与设置”中导出备份文件，避免浏览器清理数据后丢失。</div>`;
   $$('.more-item').forEach(el=>el.onclick=()=>navigate(el.dataset.route));
 }
@@ -778,24 +833,66 @@ async function renderLedger(){
   const draw=()=>{const q=$('#ledgerSearch').value.trim().toLowerCase(),type=$('#ledgerType').value,rows=moves.filter(m=>(!type||m.type===type)&&(!q||[m.productName,m.productCode,m.note].some(v=>String(v||'').toLowerCase().includes(q))));$('#ledgerList').innerHTML=rows.length?rows.map(m=>`<div class="timeline-item"><div class="time">${fmtDateTime(m.createdAt)}</div><div class="text"><strong>${esc(m.productName)}</strong> · ${esc(moveTypeName(m.type))}　<span class="${m.qtyChange>=0?'success-text':'danger-text'}">${m.qtyChange>=0?'+':''}${fmtInt(m.qtyChange)}</span></div><div class="item-meta">库存 ${fmtInt(m.beforeStock)} → ${fmtInt(m.afterStock)}　${esc(m.note||'')}</div></div>`).join(''):emptyState('≡','暂无库存流水');};draw();$('#ledgerSearch').oninput=draw;$('#ledgerType').onchange=draw;
 }
 
+function auditActionName(action){
+  const map={'product.create':'新增商品','product.copy':'复制商品','product.update':'修改商品','product.delete':'删除商品','loan.create':'新增调借','loan.document':'保存凭证','loan.return':'调借归还','loan.sale':'借调售出','sale.create':'新建销售','sale.loan_create':'借调售出开单','sale.cancel':'撤销销售','sale.restore':'恢复销售','backup.restore':'恢复备份','data.clear':'清空数据'};
+  if(action.startsWith('stock.'))return `库存：${moveTypeName(action.slice(6))}`;
+  return map[action]||action;
+}
+async function renderAuditLogs(){
+  setHeader('操作日志','最近1000条重要操作');
+  const logs=(await dbAll('auditLogs')).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  $('#main').innerHTML=`<div class="notice">日志会随业务数据同步到云端；图片和签名不会写入日志，避免备份体积膨胀。</div><div class="toolbar"><div class="search"><input id="auditSearch" placeholder="操作、商品、单号、摘要"></div><button id="exportAudit" class="btn secondary small">导出CSV</button></div><div id="auditList" class="timeline"></div>`;
+  const draw=()=>{const q=$('#auditSearch').value.trim().toLowerCase(),rows=logs.filter(x=>!q||[x.action,x.entityType,x.entityId,x.summary].some(v=>String(v||'').toLowerCase().includes(q))).slice(0,400);$('#auditList').innerHTML=rows.length?rows.map(x=>`<div class="timeline-item"><div class="time">${fmtDateTime(x.createdAt)}</div><div class="text"><strong>${esc(auditActionName(x.action))}</strong> · ${esc(x.summary||'')}</div><div class="item-meta">${esc(x.entityType||'')} ${esc(x.entityId||'')} · 设备 ${esc(String(x.deviceId||'').slice(0,8)||'本机')}</div></div>`).join(''):emptyState('◷','暂无操作日志');};draw();$('#auditSearch').oninput=draw;
+  $('#exportAudit').onclick=()=>{const head=['时间','操作','对象类型','对象ID','摘要','设备'];const rows=logs.map(x=>[x.createdAt,auditActionName(x.action),x.entityType,x.entityId,x.summary,x.deviceId]);downloadBlob('\ufeff'+[head,...rows].map(r=>r.map(csvCell).join(',')).join('\n'),`操作日志_${new Date().toISOString().slice(0,10)}.csv`,'text/csv;charset=utf-8');};
+}
+async function calculateInventoryHealth(){
+  const [products,moves]=await Promise.all([dbAll('products'),dbAll('stockMoves')]);
+  const groups=new Map();for(const move of moves){if(!groups.has(move.productId))groups.set(move.productId,[]);groups.get(move.productId).push(move);}
+  const rows=products.map(product=>{const list=(groups.get(product.id)||[]).sort((a,b)=>new Date(a.createdAt)-new Date(b.createdAt));let expected=0,chainBroken=false;for(const move of list){if(Math.abs(n(move.beforeStock)-expected)>1e-8&&move.type!=='ledger_reconcile')chainBroken=true;expected+=n(move.qtyChange);if(Math.abs(n(move.afterStock)-expected)>1e-8)chainBroken=true;}return {product,moves:list.length,expected,current:n(product.stock),difference:n(product.stock)-expected,chainBroken};});
+  const orphanMoves=moves.filter(m=>!products.some(p=>p.id===m.productId));
+  return {rows,issues:rows.filter(r=>Math.abs(r.difference)>1e-8||r.chainBroken),orphanMoves};
+}
+async function reconcileLedger(productId){
+  const health=await calculateInventoryHealth(),row=health.rows.find(x=>x.product.id===productId);if(!row||Math.abs(row.difference)<1e-8)return;
+  const p=row.product,move={id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type:'ledger_reconcile',qtyChange:row.difference,beforeStock:row.expected,afterStock:row.current,refType:'health',refId:uid('health'),note:'库存体检：以当前商品库存补齐缺失流水',createdAt:nowISO()};await dbPut('stockMoves',move);await writeAudit('stock.ledger_reconcile','product',p.id,`${p.name} 补齐库存流水 ${fmtInt(row.expected)} → ${fmtInt(row.current)}`,{ledgerStock:row.expected},{ledgerStock:row.current});
+}
+async function renderInventoryHealth(){
+  setHeader('库存体检','核对商品库存和库存流水');
+  const result=await calculateInventoryHealth();
+  $('#main').innerHTML=`<div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${result.rows.length}</div></div><div class="metric compact"><div class="label">异常商品</div><div class="value ${result.issues.length?'danger-text':'success-text'}">${result.issues.length}</div></div><div class="metric compact"><div class="label">孤立流水</div><div class="value ${result.orphanMoves.length?'danger-text':''}">${result.orphanMoves.length}</div></div></div><div class="notice ${result.issues.length?'warn':'success'}" style="margin-top:12px">${result.issues.length?'发现差异时先核对实物库存。若商品页库存正确，可用“补齐流水”；若实物数量不同，应去库存盘点。':'全部商品的当前库存与库存流水一致。'}</div><div class="section-title">检查结果</div><div class="list">${result.issues.length?result.issues.map(r=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(r.product.name)}</div><div class="item-meta">商品库存 ${fmtInt(r.current)} · 流水推算 ${fmtInt(r.expected)} · 差异 ${r.difference>=0?'+':''}${fmtInt(r.difference)}${r.chainBroken?' · 流水前后值存在断点':''}</div></div><button class="btn secondary small reconcile-ledger" data-id="${r.product.id}">补齐流水</button></div>`).join(''):emptyState('✓','库存流水一致')}</div>${result.orphanMoves.length?`<div class="section-title danger-text">孤立流水</div><div class="notice danger">有 ${result.orphanMoves.length} 条流水找不到对应商品。请先导出完整备份，再联系维护人员处理，不建议直接删除。</div>`:''}`;
+  $$('.reconcile-ledger').forEach(btn=>btn.onclick=async()=>{if(!await confirmDialog('确认当前商品库存数字是正确的，并仅补一条校正流水？'))return;await reconcileLedger(btn.dataset.id);showToast('校正流水已补齐');renderInventoryHealth();});
+}
+
 async function renderSettings(){
   const cloudEnabled=['cloud','error'].includes(window.CloudSync?.mode);
   setHeader('数据与设置',cloudEnabled?'云端同步、备份与合同抬头':'本机备份与合同抬头');
-  const counts={};for(const store of STORES)counts[store]=(await dbAll(store)).length;const profile=await getLegalProfile();
+  const counts={};for(const store of STORES)counts[store]=(await dbAll(store)).length;const profile=await getLegalProfile();const lastExport=localStorage.getItem('mocui_last_local_backup')||'';
   $('#main').innerHTML=`${cloudEnabled?'':`<div class="notice warn"><strong>当前未连接云端</strong><br>请检查网络后刷新页面。不要清理浏览器网站数据，并先导出 JSON 备份。</div>`}
-  ${cloudEnabled?`<div class="card"><div class="card-title">Cloudflare 云端</div><div class="grid-3"><div class="metric compact"><div class="label">同步版本</div><div class="value">${fmtInt(CloudSync.revision||0)}</div></div><div class="metric compact"><div class="label">设备</div><div class="value" style="font-size:12px">${esc(String(CloudSync.deviceId||'').slice(0,8))}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:13px">${CloudSync.mode==='cloud'?'正常':'待处理'}</div></div></div><div class="btn-row" style="margin-top:10px"><button id="syncNow" class="btn secondary">立即同步</button><button id="cloudBackups" class="btn secondary">云端备份</button><button id="changeCloudPassword" class="btn secondary">修改密码</button></div><button id="forceCloudUpload" class="btn warn block" style="margin-top:8px">本机数据强制覆盖云端</button><button id="logoutCloud" class="btn ghost block" style="margin-top:8px">退出登录</button></div>`:''}
+  ${cloudEnabled?`<div class="card"><div class="card-title">Cloudflare 云端</div><div class="grid-3"><div class="metric compact"><div class="label">同步版本</div><div class="value">${fmtInt(CloudSync.revision||0)}</div></div><div class="metric compact"><div class="label">设备</div><div class="value" style="font-size:12px">${esc(String(CloudSync.deviceId||'').slice(0,8))}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:13px">${CloudSync.mode==='cloud'?'正常':'待处理'}</div></div></div><div class="btn-row" style="margin-top:10px"><button id="syncNow" class="btn secondary">立即同步</button><button id="cloudBackups" class="btn secondary">云端备份</button><button id="manageDevices" class="btn secondary">登录设备</button><button id="changeCloudPassword" class="btn secondary">修改密码</button></div><button id="forceCloudUpload" class="btn warn block" style="margin-top:8px">本机数据强制覆盖云端</button><button id="logoutCloud" class="btn ghost block" style="margin-top:8px">退出登录</button></div>`:''}
   <div class="card"><div class="card-title">合同抬头</div><div class="notice">用于自动生成借调协议和调拨交接单；内容会跟随业务数据同步到云端。请填写真实签约主体。</div><form id="legalProfileForm"><div class="form-group"><label class="form-label">甲方真实姓名/公司名称</label><input id="setPartyAName" class="input" value="${esc(profile.partyAName)}"></div><div class="form-group"><label class="form-label">身份证号/统一社会信用代码</label><input id="setPartyAIdNo" class="input" value="${esc(profile.partyAIdNo)}"></div><div class="form-row"><div class="form-group"><label class="form-label">联系电话</label><input id="setPartyAPhone" class="input" value="${esc(profile.partyAPhone)}"></div><div class="form-group"><label class="form-label">交接地点</label><input id="setDeliveryPlace" class="input" value="${esc(profile.defaultDeliveryPlace)}"></div></div><div class="form-group"><label class="form-label">住所/经营地址</label><input id="setPartyAAddress" class="input" value="${esc(profile.partyAAddress)}"></div><div class="form-group"><label class="form-label">默认争议管辖</label><input id="setDisputeCourt" class="input" value="${esc(profile.defaultDisputeCourt)}"></div><button class="btn secondary block" type="submit">保存合同抬头</button></form></div>
-  <div class="card"><div class="card-title">本地独立备份</div><div class="notice warn">云端同步不能代替独立备份。建议每周导出一次完整 JSON，并保存到 iCloud 或其他可靠位置。</div><button id="backupAll" class="btn block">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
+  <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：漠翠自用进销存 1.0 Final<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：漠翠自用进销存 2.4 稳定版<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
   if($('#cloudBackups'))$('#cloudBackups').onclick=openCloudBackupManager;
+  if($('#manageDevices'))$('#manageDevices').onclick=openDeviceManager;
   if($('#changeCloudPassword'))$('#changeCloudPassword').onclick=openCloudPasswordForm;
   if($('#forceCloudUpload'))$('#forceCloudUpload').onclick=async()=>{if(!await confirmDialog('只有确认云端数据不需要保留时才能继续。确定用本机数据覆盖云端？'))return;if(!await confirmDialog('再次确认：覆盖后，其他设备的云端新数据会被本机版本替代。'))return;try{await CloudSync.forcePush();showToast('本机数据已覆盖云端');renderSettings();}catch(err){showToast(err.message);}};
   if($('#logoutCloud'))$('#logoutCloud').onclick=()=>CloudSync.logout();
+  if($('#inventoryHealth'))$('#inventoryHealth').onclick=()=>navigate('health');if($('#openAuditLogs'))$('#openAuditLogs').onclick=()=>navigate('audit');
+}
+
+function deviceNameFromAgent(agent=''){
+  if(/iPhone/i.test(agent))return 'iPhone';if(/iPad/i.test(agent))return 'iPad';if(/Macintosh/i.test(agent))return 'Mac';if(/Android/i.test(agent))return '安卓设备';if(/Windows/i.test(agent))return 'Windows';return '其他设备';
+}
+function openDeviceManager(){
+  openModal('登录设备',`<div class="notice">可以查看当前仍有效的登录会话，并让其他设备立即退出。</div><div id="deviceList">${emptyState('↻','正在读取设备…')}</div><button id="logoutOtherDevices" class="btn warn block" style="margin-top:10px">退出其他全部设备</button>`,{onOpen:async()=>{
+    const load=async()=>{try{const result=await CloudSync.listSessions(),rows=result.sessions||[];$('#deviceList').innerHTML=rows.length?rows.map(s=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(deviceNameFromAgent(s.user_agent))}${s.isCurrent?' · 当前设备':''}</div><div class="item-meta">最近活动 ${fmtDateTime(s.last_seen_at)} · 登录 ${fmtDateTime(s.created_at)} · ${esc(s.ip_address||'')}</div></div>${s.isCurrent?'':`<button class="btn danger small revoke-session" data-id="${s.id}">退出</button>`}</div>`).join(''):emptyState('⌁','没有登录设备');$$('.revoke-session').forEach(btn=>btn.onclick=async()=>{if(!await confirmDialog('让这台设备立即退出登录？'))return;await CloudSync.revokeSession(btn.dataset.id);showToast('设备已退出');await load();});}catch(err){$('#deviceList').innerHTML=`<div class="notice danger">读取失败：${esc(err.message)}</div>`;}};
+    $('#logoutOtherDevices').onclick=async()=>{if(!await confirmDialog('确定让除当前手机外的全部设备退出？'))return;await CloudSync.logoutOtherSessions();showToast('其他设备已全部退出');await load();};await load();
+  }});
 }
 
 function openCloudPasswordForm(){
@@ -807,18 +904,18 @@ function openCloudBackupManager(){
 }
 
 async function backupAll(){
-  const data={app:'漠翠进销存',version:'1.0',exportedAt:nowISO(),stores:{}};for(const s of STORES)data.stores[s]=await dbAll(s);downloadBlob(JSON.stringify(data,null,2),`漠翠进销存完整备份_${new Date().toISOString().slice(0,10)}.json`,'application/json');showToast('备份文件已导出');
+  const exportedAt=nowISO(),data={app:'漠翠进销存',version:'2.4',exportedAt,stores:{}};for(const s of STORES)data.stores[s]=await dbAll(s);downloadBlob(JSON.stringify(data,null,2),`漠翠进销存完整备份_${new Date().toISOString().slice(0,10)}.json`,'application/json');localStorage.setItem('mocui_last_local_backup',exportedAt);showToast('备份文件已导出');
 }
 async function restoreAll(e){
-  const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await readFileAsText(f));if(!data.stores)throw new Error('不是有效备份文件');if(!await confirmDialog('恢复会清空并覆盖当前所有数据，确定继续？'))return;for(const s of STORES){await dbClear(s);for(const row of (data.stores[s]||[]))await dbPut(s,row);}await ensureDefaults();showToast('数据恢复完成');navigate('dashboard');}catch(err){showToast(`恢复失败：${err.message}`);}finally{e.target.value='';}
+  const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await readFileAsText(f));if(!data.stores)throw new Error('不是有效备份文件');if(!await confirmDialog('恢复会清空并覆盖当前所有数据，确定继续？'))return;for(const s of STORES){await dbClear(s);for(const row of (data.stores[s]||[]))await dbPut(s,row);}await ensureDefaults();await writeAudit('backup.restore','system','backup','已从 JSON 备份恢复',null,{exportedAt:data.exportedAt||'',counts:Object.fromEntries(STORES.map(s=>[s,(data.stores[s]||[]).length]))});showToast('数据恢复完成');navigate('dashboard');}catch(err){showToast(`恢复失败：${err.message}`);}finally{e.target.value='';}
 }
 async function clearAllData(){
-  if(!await confirmDialog('此操作不可撤销。确定清空商品、销售、调借、客户和库存流水？'))return;if(!await confirmDialog('再次确认：真的要清空全部业务数据？'))return;for(const s of STORES)await dbClear(s);await ensureDefaults();showToast('全部数据已清空');navigate('dashboard');
+  if(!await confirmDialog('此操作不可撤销。确定清空商品、销售、调借、客户和库存流水？'))return;if(!await confirmDialog('再次确认：真的要清空全部业务数据？'))return;for(const s of STORES)await dbClear(s);await ensureDefaults();await writeAudit('data.clear','system','all','全部业务数据已清空',null,{clearedAt:nowISO()});showToast('全部数据已清空');navigate('dashboard');
 }
 
 async function init(){
   db=await openDB();await CloudSync.bootstrap();await ensureDefaults();
-  $$('.nav-item').forEach(b=>b.onclick=()=>{if(appState.route==='sale-new')syncSaleFormToDraft();navigate(b.dataset.route);});
+  $$('.nav-item').forEach(b=>b.onclick=()=>{if(appState.route==='sale-new')syncSaleFormToDraft();navigate(b.dataset.route,{}, {reset:true});});
   if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
   await render();
 }

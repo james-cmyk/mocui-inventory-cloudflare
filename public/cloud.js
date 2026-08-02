@@ -108,7 +108,7 @@
     for (const name of STORES) stores[name] = await dbAll(name);
     return {
       app:'漠翠进销存',
-      version:'2.0-cloud',
+      version:'2.4-cloud',
       exportedAt:new Date().toISOString(),
       deviceId,
       stores,
@@ -228,6 +228,10 @@
     return result;
   }
 
+  async function listSessions() { return api('/api/auth/sessions'); }
+  async function logoutOtherSessions() { return api('/api/auth/sessions/logout-others', {method:'POST'}); }
+  async function revokeSession(sessionId) { return api(`/api/auth/sessions/${encodeURIComponent(sessionId)}`, {method:'DELETE'}); }
+
   window.CloudSync = {
     bootstrap,
     pull,
@@ -238,6 +242,9 @@
     changePassword,
     listBackups,
     restoreBackup,
+    listSessions,
+    logoutOtherSessions,
+    revokeSession,
     get mode() { return mode; },
     get health() { return health; },
     get revision() { return revision; },

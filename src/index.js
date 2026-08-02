@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.4.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -258,6 +258,7 @@ async function currentSession(request, env) {
 async function requireSession(request, env) {
   const session = await currentSession(request, env);
   if (!session) throw json({ error: "请先登录" }, 401);
+  await env.DB.prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?").bind(Date.now(), session.id).run();
   return session;
 }
 
@@ -376,6 +377,30 @@ async function changePassword(request, env) {
   const nextSession = await createSession(request, env);
   await audit(env, request, "password_changed", session.id);
   return json({ ok: true }, 200, { "set-cookie": nextSession.cookie });
+}
+
+async function listSessions(request, env) {
+  const current = await requireSession(request, env);
+  const rows = await env.DB.prepare(`SELECT id, created_at, last_seen_at, expires_at, user_agent, ip_address
+    FROM sessions WHERE expires_at >= ? ORDER BY last_seen_at DESC`).bind(Date.now()).all();
+  return json({ sessions: (rows.results || []).map((row) => ({
+    ...row, isCurrent: row.id === current.id,
+  })) });
+}
+
+async function logoutOtherSessions(request, env) {
+  const current = await requireSession(request, env);
+  const result = await env.DB.prepare("DELETE FROM sessions WHERE id <> ?").bind(current.id).run();
+  await audit(env, request, "logout_other_sessions", `kept=${current.id}`);
+  return json({ ok: true, removed: Number(result.meta?.changes || 0) });
+}
+
+async function revokeSession(request, env, sessionId) {
+  const current = await requireSession(request, env);
+  if (sessionId === current.id) return json({ error: "不能在这里退出当前设备，请使用退出登录" }, 400);
+  const result = await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionId).run();
+  await audit(env, request, "session_revoked", sessionId);
+  return json({ ok: true, removed: Number(result.meta?.changes || 0) });
 }
 
 function decodeDataUrl(value) {
@@ -595,6 +620,10 @@ async function handleApi(request, env, ctx) {
   if (path === "/api/auth/change-password" && request.method === "POST") {
     return changePassword(request, env);
   }
+  if (path === "/api/auth/sessions" && request.method === "GET") return listSessions(request, env);
+  if (path === "/api/auth/sessions/logout-others" && request.method === "POST") return logoutOtherSessions(request, env);
+  const sessionMatch = /^\/api\/auth\/sessions\/([^/]+)$/.exec(path);
+  if (sessionMatch && request.method === "DELETE") return revokeSession(request, env, decodeURIComponent(sessionMatch[1]));
   if (path === "/api/sync" && request.method === "GET") return syncGet(request, env);
   if (path === "/api/sync" && request.method === "PUT") return syncPut(request, env, ctx);
   if (path === "/api/backups" && request.method === "GET") return listBackups(request, env);

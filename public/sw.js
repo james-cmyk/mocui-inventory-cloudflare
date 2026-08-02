@@ -1,4 +1,4 @@
-const CACHE='mocui-inventory-pwa-v2-2-0';
+const CACHE='mocui-inventory-pwa-v2-4-0';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{

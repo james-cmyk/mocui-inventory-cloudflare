@@ -17,9 +17,12 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div>
-        <div class="brand">漠翠进销存</div>
-        <div id="pageSubtitle" class="subtitle">云端同步版</div>
+      <div class="top-title-group">
+        <button id="pageBack" class="page-back hidden" type="button" aria-label="返回上一页">←</button>
+        <div>
+          <div class="brand">漠翠进销存</div>
+          <div id="pageSubtitle" class="subtitle">云端同步版</div>
+        </div>
       </div>
       <div class="top-actions"><span id="cloudBadge" class="cloud-badge checking">连接中</span><button id="topAction" class="icon-btn hidden" type="button" aria-label="页面操作">＋</button></div>
     </header>
@@ -29,7 +32,6 @@
     <nav class="bottom-nav" aria-label="主导航">
       <button data-route="dashboard" class="nav-item active"><span>⌂</span><b>概况</b></button>
       <button data-route="products" class="nav-item"><span>◫</span><b>商品</b></button>
-      <button data-route="sale-new" class="nav-item nav-primary"><span>＋</span><b>开单</b></button>
       <button data-route="loans" class="nav-item"><span>⇄</span><b>调借</b></button>
       <button data-route="reports" class="nav-item"><span>▥</span><b>报表</b></button>
       <button data-route="more" class="nav-item"><span>•••</span><b>更多</b></button>
