@@ -3,6 +3,7 @@
   let revision = 0;
   let timer = null;
   let syncing = false;
+  let pulling = false;
   let dirty = false;
   let mode = 'checking';
   let health = null;
@@ -108,7 +109,7 @@
     for (const name of STORES) stores[name] = await dbAll(name);
     return {
       app:'漠翠进销存',
-      version:'2.4-cloud',
+      version:'2.8-cloud',
       exportedAt:new Date().toISOString(),
       deviceId,
       stores,
@@ -130,22 +131,29 @@
 
   async function pull() {
     if (mode !== 'cloud') return {skipped:true, mode};
-    setStatus('syncing', '正在读取云端数据');
+    if (pulling) return {queued:true};
+    pulling = true;
+    setStatus('syncing', '正在后台同步');
     try {
       const result = await api('/api/sync');
       revision = Number(result.revision || 0);
       if (result.snapshot) await importStores(result.snapshot);
       setStatus('cloud', result.updatedAt ? `云端已同步 · ${new Date(result.updatedAt).toLocaleString('zh-CN')}` : 'Cloudflare 云端同步');
+      window.dispatchEvent(new CustomEvent('cloud-pull-ok', {detail:{revision}}));
       return result;
     } catch (error) {
       setStatus('error', '云端读取失败');
+      window.dispatchEvent(new CustomEvent('cloud-pull-error', {detail:{message:error.message}}));
       throw error;
+    } finally {
+      pulling = false;
+      if (dirty) schedule(500);
     }
   }
 
   async function push({force = false} = {}) {
     if (mode !== 'cloud' && mode !== 'error') return {skipped:true, mode};
-    if (syncing || window.__cloudImporting) {
+    if (syncing || pulling || window.__cloudImporting) {
       dirty = true;
       return {queued:true};
     }
@@ -185,18 +193,29 @@
   }
 
   function schedule(delay = 1000) {
-    if (!['cloud','error'].includes(mode) || window.__cloudImporting) return;
+    if (window.__cloudImporting) return;
+    if (syncing || pulling || mode === 'syncing') {
+      dirty = true;
+      return;
+    }
+    if (!['cloud','error'].includes(mode)) return;
     clearTimeout(timer);
     timer = setTimeout(() => void push().catch(() => {}), delay);
   }
 
-  async function bootstrap() {
+  async function bootstrap({deferPull = false} = {}) {
     try {
-      health = await api('/api/health');
-      if (health.needsSetup) await authScreen({setup:true});
-      await ensureAuthenticated();
-      setStatus('cloud');
-      await pull();
+      setStatus('checking', '正在验证登录');
+      // 正常已登录启动只请求一次 /auth/me；仅未登录时再查询首次设置状态。
+      try {
+        await api('/api/auth/me');
+      } catch (error) {
+        if (error.status !== 401) throw error;
+        health = await api('/api/health');
+        await authScreen({setup:Boolean(health.needsSetup)});
+      }
+      setStatus('cloud', '本地数据已就绪');
+      if (!deferPull) await pull();
     } catch (error) {
       console.error('cloud bootstrap failed', error);
       setStatus('error', `云端连接失败：${error.message}`);

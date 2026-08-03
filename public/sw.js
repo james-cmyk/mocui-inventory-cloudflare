@@ -1,5 +1,5 @@
-const CACHE='mocui-inventory-pwa-v2-4-0';
-const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-inventory-pwa-v2-8-0';
+const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -16,38 +16,31 @@ self.addEventListener('activate',event=>{
   ]));
 });
 
-async function networkFirst(request,fallback){
+async function updateCache(request,cacheKey=request){
   try{
     const response=await fetch(request,{cache:'no-store'});
-    if(response.ok){
-      const cache=await caches.open(CACHE);
-      await cache.put(request,response.clone());
-    }
+    if(response.ok){const cache=await caches.open(CACHE);await cache.put(cacheKey,response.clone());}
     return response;
-  }catch{
-    return (await caches.match(request))||(fallback?await caches.match(fallback):Response.error());
-  }
+  }catch{return null;}
+}
+
+async function appShell(request,event){
+  const cached=(await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'));
+  if(cached){event.waitUntil(updateCache(request,'./index.html'));return cached;}
+  return (await updateCache(request,'./index.html'))||(await caches.match('./offline.html'))||Response.error();
+}
+
+async function staleWhileRevalidate(request,event){
+  const cached=await caches.match(request);
+  const network=updateCache(request);
+  if(cached){event.waitUntil(network);return cached;}
+  return (await network)||Response.error();
 }
 
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')) return;
-
-  if(event.request.mode==='navigate'){
-    event.respondWith(networkFirst(event.request,'./offline.html'));
-    return;
-  }
-
-  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){
-    event.respondWith(networkFirst(event.request));
-    return;
-  }
-
-  event.respondWith(caches.match(event.request).then(cached=>cached||fetch(event.request).then(async response=>{
-    if(response.ok){
-      const cache=await caches.open(CACHE);
-      await cache.put(event.request,response.clone());
-    }
-    return response;
-  })));
+  if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return;}
+  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
+  event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });

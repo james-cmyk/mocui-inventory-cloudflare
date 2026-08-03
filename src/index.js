@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.8.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -28,7 +28,7 @@ function withSecurityHeaders(response) {
   next.headers.set("permissions-policy", "camera=(self), microphone=(), geolocation=()");
   next.headers.set(
     "content-security-policy",
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data: blob: https://thumb.qinsilk.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
   return next;
 }
