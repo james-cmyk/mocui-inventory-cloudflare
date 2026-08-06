@@ -351,13 +351,23 @@ function enhanceCurrentPage(){
 function setupViewportBehavior(){
   const viewport=window.visualViewport;
   if(!viewport)return;
+  const isEditableFocused=()=>{
+    const el=document.activeElement;
+    if(!el||el===document.body)return false;
+    return el.matches('textarea, select, [contenteditable="true"], input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"])');
+  };
   const update=()=>{
-    const keyboardOpen=window.innerHeight-viewport.height>170;
+    // iOS 在页面高度、地址栏或横向标签变化时也会触发 visualViewport resize。
+    // 只有可编辑控件真正获得焦点并且可视高度明显缩小时，才视为键盘打开。
+    const viewportShrink=Math.max(0,window.innerHeight-viewport.height);
+    const keyboardOpen=isEditableFocused()&&viewportShrink>120;
     document.body.classList.toggle('keyboard-open',keyboardOpen);
     document.documentElement.style.setProperty('--visual-viewport-height',`${viewport.height}px`);
   };
   viewport.addEventListener('resize',update,{passive:true});
   viewport.addEventListener('scroll',update,{passive:true});
+  document.addEventListener('focusin',update,{passive:true});
+  document.addEventListener('focusout',()=>setTimeout(update,80),{passive:true});
   update();
 }
 
@@ -383,7 +393,6 @@ async function renderDashboard(){
   const profit=rows=>rows.reduce((s,r)=>s+r.items.reduce((x,i)=>x+(n(i.price)-n(i.costPrice))*n(i.qty),0)-n(r.discountAmount),0);
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
-  const low=products.filter(p=>n(p.stock)<=1).sort((a,b)=>n(a.stock)-n(b.stock)).slice(0,6);
   $('#main').innerHTML=`
     <div class="grid-2">
       <div class="metric"><div class="label">今日销售额</div><div class="value money">${fmtMoney(sumAmount(todaySales))}</div><div class="hint">${todaySales.length} 笔销售</div></div>
@@ -398,14 +407,11 @@ async function renderDashboard(){
       <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div>
     </div>
     ${(overdue.length||dueSoon.length)?`<div class="section-title ${overdue.length?'danger-text':''}">调借到期提醒 <small>${overdue.length} 单超期 · ${dueSoon.length} 单7天内到期</small></div><div class="list">${[...overdue,...dueSoon.filter(x=>!overdue.includes(x))].slice(0,6).map(loanListItem).join('')}</div>`:''}
-    <div class="section-title">库存提醒 <small>库存≤1</small></div>
-    ${low.length?`<div class="list">${low.map(productListItem).join('')}</div>`:emptyState('✓','暂无低库存商品')}
     <div class="section-title">快捷操作</div>
     <div class="grid-2">
       <button class="btn block" id="quickSale">销售开单</button><button class="btn secondary block" id="quickProduct">新增商品</button>
       <button class="btn secondary block" id="quickLoan">新增调借</button><button class="btn secondary block" id="quickStocktake">库存盘点</button>
     </div>`;
-  $$('#main [data-product-id]').forEach(el=>el.onclick=()=>navigate('product-detail',{id:el.dataset.productId}));
   $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake');
 }
 
@@ -1084,6 +1090,8 @@ async function refreshCurrentPageAfterPull(){
 }
 function bindPrimaryNavigation(){
   $$('.nav-item').forEach(b=>b.onclick=()=>{
+    if(document.activeElement&&document.activeElement.matches?.('input, textarea, select, [contenteditable="true"]'))document.activeElement.blur();
+    document.body.classList.remove('keyboard-open');
     if(appState.route==='sale-new')syncSaleFormToDraft();
     const target=b.dataset.route;
     if(navRouteFor(appState.route)===target&&appState.route===target){

@@ -112,8 +112,9 @@ button,.btn,.nav-item,.list-item.clickable{touch-action:manipulation}
 .input,.select,.textarea,.btn{min-height:44px}
 .topbar,.bottom-nav{transform:translateZ(0)}
 body.keyboard-open{padding-bottom:18px}
-body.keyboard-open .bottom-nav{transform:translateY(110%);pointer-events:none}
-.bottom-nav{transition:transform .2s ease}
+/* Dock 固定在同一基线；键盘出现时仅淡出，避免 iOS 误判造成整栏上下跳动。 */
+.bottom-nav{bottom:0!important;transition:opacity .16s ease,visibility .16s ease;will-change:opacity;backface-visibility:hidden}
+body.keyboard-open .bottom-nav{opacity:0;visibility:hidden;pointer-events:none}
 .modal{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .table-wrap,.segment{overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
 @media(prefers-reduced-motion:reduce){
