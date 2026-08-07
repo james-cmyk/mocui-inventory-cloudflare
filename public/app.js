@@ -4,7 +4,7 @@ const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
 const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more'};
+const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more'};
 let db;
 let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
@@ -263,7 +263,7 @@ function navRouteFor(route){
   if(route==='products' || route.startsWith('product')) return 'products';
   if(route==='loans' || route.startsWith('loan')) return 'loans';
   if(route==='reports') return 'reports';
-  if(route==='more' || ['customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import'].includes(route)) return 'more';
+  if(route==='more' || ['content','customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import'].includes(route)) return 'more';
   return route;
 }
 function setActiveNav(route){
@@ -375,7 +375,7 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
-    more:renderMore, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
+    more:renderMore, content:renderContentHub, 'product-content':renderProductContent, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
 }
@@ -411,8 +411,9 @@ async function renderDashboard(){
     <div class="grid-2">
       <button class="btn block" id="quickSale">销售开单</button><button class="btn secondary block" id="quickProduct">新增商品</button>
       <button class="btn secondary block" id="quickLoan">新增调借</button><button class="btn secondary block" id="quickStocktake">库存盘点</button>
-    </div>`;
-  $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake');
+    </div>
+    <button class="content-dashboard-link" id="quickContent"><span><strong>内容工作台</strong><small>今日待发 · 图片视频 · 文案 · 重复曝光</small></span><b>›</b></button>`;
+  $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickContent').onclick=()=>navigate('content');
 }
 
 async function renderProducts(){
@@ -460,7 +461,7 @@ async function openProductForm(product=null,{copy=false}={}){
       $('#productImage',root).onchange=async e=>{const f=e.target.files[0]; if(!f)return; image=await compressImage(f);window.__mocuiProductDirty=true;saveDraft(); $('#productImagePreview',root).innerHTML=`<img src="${image}" alt="">`;};
       $('#productForm',root).onsubmit=async e=>{
         e.preventDefault(); const fd=new FormData(e.target); const oldStock=n(p.stock), newStock=n(fd.get('stock'));
-        const obj={id:copy||!product?uid('prod'):p.id,name:String(fd.get('name')).trim(),code:String(fd.get('code')).trim()||await nextProductCode(),category:String(fd.get('category')),color:String(fd.get('color')).trim(),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:product&&!copy?oldStock:newStock,note:String(fd.get('note')).trim(),image,createdAt:copy||!product?nowISO():p.createdAt,updatedAt:nowISO()};
+        const obj={...(product&&!copy?p:{}),id:copy||!product?uid('prod'):p.id,name:String(fd.get('name')).trim(),code:String(fd.get('code')).trim()||await nextProductCode(),category:String(fd.get('category')),color:String(fd.get('color')).trim(),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:product&&!copy?oldStock:newStock,note:String(fd.get('note')).trim(),image,createdAt:copy||!product?nowISO():p.createdAt,updatedAt:nowISO()};
         if(!obj.name){showToast('请填写商品名称');return;}
         const before=product?auditSafe(product):null;await dbPut('products',obj);
         if((copy||!product)&&obj.stock!==0) await dbPut('stockMoves',{id:uid('move'),productId:obj.id,productCode:obj.code,productName:obj.name,type:'initial',qtyChange:obj.stock,beforeStock:0,afterStock:obj.stock,refType:'product',refId:obj.id,note:'新建商品初始库存',createdAt:nowISO()});
@@ -515,7 +516,7 @@ async function renderProductDetail(){
   const productSales=sales.filter(s=>s.status==='active'&&s.items.some(i=>i.productId===p.id));
   $('#main').innerHTML=`
     <div class="card"><div style="display:flex;gap:14px">${imageThumb({...p,image:p.image})}<div class="item-main"><div class="item-title" style="font-size:18px">${esc(p.name)}</div><div class="item-meta">${esc(p.category||'未分类')} · ${esc(p.color||'未填写颜色')}</div><div class="btn-row" style="margin-top:10px"><span class="badge success">库存 ${fmtInt(p.stock)}</span><span class="badge">成本 ${fmtMoney(p.costPrice)}</span><span class="badge">售价 ${fmtMoney(p.salePrice)}</span></div></div></div>${p.note?`<div class="product-note-box"><strong>商品备注</strong><span>${esc(p.note)}</span></div>`:''}</div>
-    <div class="grid-3"><button id="productSale" class="btn">销售</button><button id="productEdit" class="btn secondary">编辑</button><button id="productStock" class="btn secondary">盘点</button></div>
+    <div class="grid-3"><button id="productSale" class="btn">销售</button><button id="productEdit" class="btn secondary">编辑</button><button id="productStock" class="btn secondary">盘点</button></div><button id="productContent" class="btn secondary block content-entry-btn">图片 / 视频素材与发布</button>
     <div class="section-title">销售明细 <small>默认近30天</small></div>
     <div class="segment" id="productRange"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div>
     <div id="productStats"></div><div id="productSalesList" class="list"></div>
@@ -532,7 +533,7 @@ async function renderProductDetail(){
   };
   drawSales();
   $$('#productRange button').forEach(b=>b.onclick=()=>{if(b.dataset.range==='custom'){openDateRangePicker((s,e)=>drawSales('custom',s,e));return;}$$('#productRange button').forEach(x=>x.classList.remove('active'));b.classList.add('active');drawSales(b.dataset.range);});
-  $('#productSale').onclick=()=>{appState.saleDraft=null;navigate('sale-new',{productId:p.id});}; $('#productEdit').onclick=()=>openProductForm(p); $('#productStock').onclick=()=>openSingleStocktake(p);
+  $('#productSale').onclick=()=>{appState.saleDraft=null;navigate('sale-new',{productId:p.id});}; $('#productEdit').onclick=()=>openProductForm(p); $('#productStock').onclick=()=>openSingleStocktake(p); $('#productContent').onclick=()=>navigate('product-content',{id:p.id});
 }
 function moveTypeName(type){return ({initial:'初始入库',sale:'销售出库',sale_cancel:'撤销回库',sale_restore:'恢复销售',stocktake:'盘点调整',stock_in:'采购入库',stock_out:'手工出库',loan_borrow:'调入库存',loan_lend:'借出库存',loan_return:'调借归还',loan_sale:'借调售出',loan_sale_cancel:'撤销借调售出',loan_sale_restore:'恢复借调售出',ledger_reconcile:'流水校正'}[type]||type);}
 function openProductActions(p){
@@ -948,7 +949,7 @@ async function runQinsilkImport(){
 
 async function renderMore(){
   setHeader('更多功能','客户、盘点、流水、备份');
-  const items=[['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
+  const items=[['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
   $('#main').innerHTML=`<div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div><div class="notice warn" style="margin-top:12px">秦丝建议继续作为正式账本；漠翠系统用于玉石专业资料、借调和分析。导入前请先做完整备份。</div>`;
   $$('.more-item').forEach(el=>el.onclick=()=>navigate(el.dataset.route));
 }
@@ -1022,7 +1023,7 @@ async function renderSettings(){
   <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：漠翠自用进销存 2.8 秦丝导入版<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：漠翠经营助手 3.0 内容工作台第一期<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
@@ -1053,7 +1054,7 @@ function openCloudBackupManager(){
 }
 
 async function backupAll(){
-  const exportedAt=nowISO(),data={app:'漠翠进销存',version:'2.8',exportedAt,stores:{}};for(const s of STORES)data.stores[s]=await dbAll(s);downloadBlob(JSON.stringify(data,null,2),`漠翠进销存完整备份_${new Date().toISOString().slice(0,10)}.json`,'application/json');localStorage.setItem('mocui_last_local_backup',exportedAt);showToast('备份文件已导出');
+  const exportedAt=nowISO(),data={app:'漠翠经营助手',version:'3.0',exportedAt,stores:{}};for(const s of STORES)data.stores[s]=await dbAll(s);downloadBlob(JSON.stringify(data,null,2),`漠翠进销存完整备份_${new Date().toISOString().slice(0,10)}.json`,'application/json');localStorage.setItem('mocui_last_local_backup',exportedAt);showToast('备份文件已导出');
 }
 async function restoreAll(e){
   const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await readFileAsText(f));if(!data.stores)throw new Error('不是有效备份文件');if(!await confirmDialog('恢复会清空并覆盖当前所有数据，确定继续？'))return;for(const s of STORES){await dbClear(s);for(const row of (data.stores[s]||[]))await dbPut(s,row);}await ensureDefaults();await writeAudit('backup.restore','system','backup','已从 JSON 备份恢复',null,{exportedAt:data.exportedAt||'',counts:Object.fromEntries(STORES.map(s=>[s,(data.stores[s]||[]).length]))});showToast('数据恢复完成');navigate('dashboard');}catch(err){showToast(`恢复失败：${err.message}`);}finally{e.target.value='';}

@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "2.8.0";
+const APP_VERSION = "3.0.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -571,13 +571,79 @@ async function restoreBackup(request, env, revision) {
   return json({ ok: true, revision: next, updatedAt: now, snapshot });
 }
 
+
+function uploadExtensionForMime(mime) {
+  return ({
+    "image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","image/heic":"heic","image/heif":"heif",
+    "video/mp4":"mp4","video/quicktime":"mov","video/x-m4v":"m4v","video/webm":"webm"
+  })[mime] || "bin";
+}
+
+function allowedUploadMime(mime) {
+  return /^(?:image\/(?:jpeg|png|webp|gif|heic|heif)|video\/(?:mp4|quicktime|x-m4v|webm))$/.test(mime);
+}
+
+async function mediaUpload(request, env) {
+  await requireSession(request, env);
+  const mime = String(request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (!allowedUploadMime(mime)) return json({ error: "暂不支持这种图片或视频格式" }, 415);
+  const isVideo = mime.startsWith("video/");
+  const maxBytes = (isVideo ? 95 : 25) * 1024 * 1024;
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length && length > maxBytes) return json({ error: `单个${isVideo ? "视频" : "图片"}超过当前上传限制` }, 413);
+  if (!request.body) return json({ error: "没有收到媒体文件" }, 400);
+  const ext = uploadExtensionForMime(mime);
+  const filename = `u-${crypto.randomUUID()}.${ext}`;
+  const productId = String(request.headers.get("x-product-id") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+  await env.STORAGE.put(`media/${filename}`, request.body, {
+    httpMetadata: { contentType: mime },
+    customMetadata: { productId, createdAt: new Date().toISOString(), source: "content-workbench" },
+  });
+  await audit(env, request, "media_uploaded", `${filename};${productId};${length || 0}`);
+  return json({ ok: true, url: `/api/media/${filename}`, filename, mime, type: isVideo ? "video" : "image", size: length || 0 });
+}
+
+async function mediaImport(request, env) {
+  await requireSession(request, env);
+  const body = await readJson(request);
+  let url;
+  try { url = new URL(String(body.url || "")); } catch { return json({ error: "图片地址无效" }, 400); }
+  if (url.protocol !== "https:" || url.hostname !== "thumb.qinsilk.com") return json({ error: "目前只允许转存秦丝图片域名" }, 400);
+  const remote = await fetch(url.toString(), { redirect: "follow" });
+  if (!remote.ok) return json({ error: "秦丝图片读取失败" }, 502);
+  const finalUrl = new URL(remote.url);
+  if (finalUrl.protocol !== "https:" || finalUrl.hostname !== "thumb.qinsilk.com") return json({ error: "图片跳转地址不受信任" }, 400);
+  const mime = String(remote.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (!/^image\/(?:jpeg|png|webp|gif)$/.test(mime)) return json({ error: "远程文件不是支持的图片" }, 415);
+  const bytes = new Uint8Array(await remote.arrayBuffer());
+  if (bytes.byteLength > 25 * 1024 * 1024) return json({ error: "远程图片超过25MB" }, 413);
+  const filename = `u-${crypto.randomUUID()}.${uploadExtensionForMime(mime)}`;
+  const productId = String(body.productId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+  await env.STORAGE.put(`media/${filename}`, bytes, {
+    httpMetadata: { contentType: mime },
+    customMetadata: { productId, createdAt: new Date().toISOString(), source: "qinsilk-import", originalUrl: url.toString().slice(0, 500) },
+  });
+  await audit(env, request, "media_imported", `${filename};${productId}`);
+  return json({ ok: true, url: `/api/media/${filename}`, filename, mime, type: "image", size: bytes.byteLength });
+}
+
+async function mediaDelete(request, env, filename) {
+  await requireSession(request, env);
+  if (!/^u-[a-f0-9-]{36}\.(?:jpg|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/.test(filename)) {
+    return json({ error: "只允许删除内容工作台上传的素材" }, 400);
+  }
+  await env.STORAGE.delete(`media/${filename}`);
+  await audit(env, request, "media_deleted", filename);
+  return json({ ok: true });
+}
+
 async function mediaGet(request, env, filename) {
   await requireSession(request, env);
-  if (!/^[a-f0-9]{64}\.(?:jpg|png|webp|gif)$/.test(filename)) {
-    return json({ error: "图片地址无效" }, 400);
-  }
+  const legacy=/^[a-f0-9]{64}\.(?:jpg|png|webp|gif)$/.test(filename);
+  const uploaded=/^u-[a-f0-9-]{36}\.(?:jpg|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/.test(filename);
+  if (!legacy && !uploaded) return json({ error: "媒体地址无效" }, 400);
   const object = await env.STORAGE.get(`media/${filename}`);
-  if (!object) return json({ error: "图片不存在" }, 404);
+  if (!object) return json({ error: "媒体文件不存在" }, 404);
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
@@ -627,6 +693,8 @@ async function handleApi(request, env, ctx) {
   if (path === "/api/sync" && request.method === "GET") return syncGet(request, env);
   if (path === "/api/sync" && request.method === "PUT") return syncPut(request, env, ctx);
   if (path === "/api/backups" && request.method === "GET") return listBackups(request, env);
+  if (path === "/api/media/upload" && request.method === "POST") return mediaUpload(request, env);
+  if (path === "/api/media/import" && request.method === "POST") return mediaImport(request, env);
 
   const restoreMatch = /^\/api\/backups\/(\d+)\/restore$/.exec(path);
   if (restoreMatch && request.method === "POST") {
@@ -634,9 +702,8 @@ async function handleApi(request, env, ctx) {
   }
 
   const mediaMatch = /^\/api\/media\/([^/]+)$/.exec(path);
-  if (mediaMatch && request.method === "GET") {
-    return mediaGet(request, env, decodeURIComponent(mediaMatch[1]));
-  }
+  if (mediaMatch && request.method === "GET") return mediaGet(request, env, decodeURIComponent(mediaMatch[1]));
+  if (mediaMatch && request.method === "DELETE") return mediaDelete(request, env, decodeURIComponent(mediaMatch[1]));
 
   return json({ error: "接口不存在" }, 404);
 }

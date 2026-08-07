@@ -109,7 +109,7 @@
     for (const name of STORES) stores[name] = await dbAll(name);
     return {
       app:'漠翠进销存',
-      version:'2.8-cloud',
+      version:'3.0-content-cloud',
       exportedAt:new Date().toISOString(),
       deviceId,
       stores,

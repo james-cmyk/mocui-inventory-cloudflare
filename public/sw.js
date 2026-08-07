@@ -1,5 +1,5 @@
-const CACHE='mocui-inventory-pwa-v2-9-2';
-const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-inventory-pwa-v3-0-1-content-original-media';
+const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
