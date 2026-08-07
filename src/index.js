@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.1.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -28,7 +28,7 @@ function withSecurityHeaders(response) {
   next.headers.set("permissions-policy", "camera=(self), microphone=(), geolocation=()");
   next.headers.set(
     "content-security-policy",
-    "default-src 'self'; img-src 'self' data: blob: https://thumb.qinsilk.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data: blob: https://thumb.qinsilk.com; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
   return next;
 }
@@ -78,6 +78,24 @@ async function ensureSchema(env) {
       ip_address TEXT
     )`),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at DESC)"),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS share_links (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      product_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      code TEXT,
+      public_price TEXT,
+      copy_text TEXT,
+      media_json TEXT NOT NULL,
+      allow_download INTEGER NOT NULL DEFAULT 1,
+      expires_at INTEGER,
+      created_at INTEGER NOT NULL,
+      revoked_at INTEGER,
+      view_count INTEGER NOT NULL DEFAULT 0,
+      download_count INTEGER NOT NULL DEFAULT 0
+    )`),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_share_links_product ON share_links(product_id, created_at DESC)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_share_links_expires ON share_links(expires_at)"),
   ]);
 }
 
@@ -652,6 +670,157 @@ async function mediaGet(request, env, filename) {
   return new Response(object.body, { headers });
 }
 
+
+function validShareToken(token) {
+  return /^[A-Za-z0-9_-]{32,120}$/.test(String(token || ""));
+}
+
+function mediaFilenameFromUrl(value) {
+  try {
+    const url = new URL(String(value || ""), "https://mocui.local");
+    const match = /^\/api\/media\/([^/]+)$/.exec(url.pathname);
+    if (!match) return null;
+    const filename = decodeURIComponent(match[1]);
+    const legacy = /^[a-f0-9]{64}\.(?:jpg|png|webp|gif)$/.test(filename);
+    const uploaded = /^u-[a-f0-9-]{36}\.(?:jpg|png|webp|gif|heic|heif|mp4|mov|m4v|webm)$/.test(filename);
+    return legacy || uploaded ? filename : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePublicMedia(input) {
+  if (!Array.isArray(input)) return [];
+  const result = [];
+  const seen = new Set();
+  for (const item of input.slice(0, 20)) {
+    const filename = mediaFilenameFromUrl(item?.url);
+    if (!filename || seen.has(filename)) continue;
+    const type = item?.type === "video" ? "video" : "image";
+    const mime = String(item?.mime || "").slice(0, 100);
+    const name = String(item?.name || filename).slice(0, 180);
+    seen.add(filename);
+    result.push({ filename, type, mime, name });
+  }
+  return result;
+}
+
+async function createShareLink(request, env) {
+  await requireSession(request, env);
+  const body = await readJson(request);
+  const media = normalizePublicMedia(body.media);
+  if (!media.length) return json({ error: "请先上传至少一张自有R2图片或一个视频" }, 400);
+  const token = randomToken(32);
+  const tokenHash = await sha256Text(token);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const days = Math.max(0, Math.min(3650, Number(body.expiresDays || 0)));
+  const expiresAt = days ? now + days * 86400000 : null;
+  const title = String(body.title || "商品素材").trim().slice(0, 200) || "商品素材";
+  const code = String(body.code || "").trim().slice(0, 100);
+  const publicPrice = String(body.publicPrice || "").trim().slice(0, 120);
+  const copyText = String(body.copyText || "").slice(0, 6000);
+  const productId = String(body.productId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 100);
+  const allowDownload = body.allowDownload === false ? 0 : 1;
+  await env.DB.prepare(`INSERT INTO share_links
+    (id, token_hash, product_id, title, code, public_price, copy_text, media_json,
+     allow_download, expires_at, created_at, revoked_at, view_count, download_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0)`)
+    .bind(id, tokenHash, productId, title, code, publicPrice, copyText, JSON.stringify(media), allowDownload, expiresAt, now)
+    .run();
+  await audit(env, request, "share_created", `${id};${productId};media=${media.length};expires=${expiresAt || "never"}`);
+  return json({ ok: true, id, token, createdAt: now, expiresAt, allowDownload: Boolean(allowDownload) });
+}
+
+async function listShareLinks(request, env) {
+  await requireSession(request, env);
+  const url = new URL(request.url);
+  const productId = String(url.searchParams.get("productId") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 100);
+  const rows = productId
+    ? await env.DB.prepare(`SELECT id, product_id, title, code, public_price, allow_download, expires_at,
+        created_at, revoked_at, view_count, download_count FROM share_links WHERE product_id = ? ORDER BY created_at DESC LIMIT 100`).bind(productId).all()
+    : await env.DB.prepare(`SELECT id, product_id, title, code, public_price, allow_download, expires_at,
+        created_at, revoked_at, view_count, download_count FROM share_links ORDER BY created_at DESC LIMIT 100`).all();
+  return json({ ok: true, shares: (rows.results || []).map(row => ({
+    id: row.id, productId: row.product_id, title: row.title, code: row.code || "",
+    publicPrice: row.public_price || "", allowDownload: Boolean(row.allow_download),
+    expiresAt: row.expires_at ? Number(row.expires_at) : null, createdAt: Number(row.created_at),
+    revokedAt: row.revoked_at ? Number(row.revoked_at) : null, viewCount: Number(row.view_count || 0),
+    downloadCount: Number(row.download_count || 0),
+  })) });
+}
+
+async function revokeShareLink(request, env, id) {
+  await requireSession(request, env);
+  const cleanId = String(id || "").slice(0, 100);
+  const result = await env.DB.prepare("UPDATE share_links SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
+    .bind(Date.now(), cleanId).run();
+  await audit(env, request, "share_revoked", cleanId);
+  return json({ ok: true, changed: Number(result.meta?.changes || 0) });
+}
+
+async function activeShareByToken(env, token) {
+  if (!validShareToken(token)) return null;
+  const tokenHash = await sha256Text(token);
+  const row = await env.DB.prepare(`SELECT id, title, code, public_price, copy_text, media_json,
+      allow_download, expires_at, created_at, revoked_at, view_count, download_count
+      FROM share_links WHERE token_hash = ?`).bind(tokenHash).first();
+  if (!row || row.revoked_at) return null;
+  if (row.expires_at && Number(row.expires_at) < Date.now()) return null;
+  let media = [];
+  try { media = JSON.parse(row.media_json || "[]"); } catch { media = []; }
+  return { row, media: Array.isArray(media) ? media : [] };
+}
+
+async function publicShareGet(request, env, token) {
+  const share = await activeShareByToken(env, token);
+  if (!share) return json({ error: "分享链接不存在或已失效" }, 404);
+  await env.DB.prepare("UPDATE share_links SET view_count = view_count + 1 WHERE id = ?").bind(share.row.id).run();
+  return json({
+    ok: true,
+    share: {
+      title: share.row.title,
+      code: share.row.code || "",
+      publicPrice: share.row.public_price || "",
+      copyText: share.row.copy_text || "",
+      allowDownload: Boolean(share.row.allow_download),
+      expiresAt: share.row.expires_at ? Number(share.row.expires_at) : null,
+      createdAt: Number(share.row.created_at),
+      media: share.media.map(item => ({
+        type: item.type === "video" ? "video" : "image",
+        name: String(item.name || item.filename || "素材").slice(0, 180),
+        mime: String(item.mime || "").slice(0, 100),
+        url: `/api/public-share/${encodeURIComponent(token)}/media/${encodeURIComponent(item.filename)}`,
+      })),
+    },
+  });
+}
+
+async function publicShareMedia(request, env, token, filename) {
+  const share = await activeShareByToken(env, token);
+  if (!share) return json({ error: "分享链接不存在或已失效" }, 404);
+  const item = share.media.find(entry => entry.filename === filename);
+  if (!item) return json({ error: "素材不在当前分享范围" }, 404);
+  const object = await env.STORAGE.get(`media/${filename}`);
+  if (!object) return json({ error: "素材文件不存在" }, 404);
+  const url = new URL(request.url);
+  const wantsDownload = url.searchParams.get("download") === "1";
+  if (wantsDownload && !Boolean(share.row.allow_download)) return json({ error: "当前分享未开放下载" }, 403);
+  if (wantsDownload) {
+    await env.DB.prepare("UPDATE share_links SET download_count = download_count + 1 WHERE id = ?").bind(share.row.id).run();
+  }
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "private, max-age=3600");
+  headers.set("x-content-type-options", "nosniff");
+  if (wantsDownload) {
+    const safeName = String(item.name || filename).replace(/["\\\r\n]/g, "_").slice(0, 160);
+    headers.set("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+  }
+  return new Response(object.body, { headers });
+}
+
 async function health(env) {
   await ensureSchema(env);
   const initialized = Boolean(await getSetting(env, "admin_password"));
@@ -695,6 +864,14 @@ async function handleApi(request, env, ctx) {
   if (path === "/api/backups" && request.method === "GET") return listBackups(request, env);
   if (path === "/api/media/upload" && request.method === "POST") return mediaUpload(request, env);
   if (path === "/api/media/import" && request.method === "POST") return mediaImport(request, env);
+  if (path === "/api/shares" && request.method === "POST") return createShareLink(request, env);
+  if (path === "/api/shares" && request.method === "GET") return listShareLinks(request, env);
+  const shareDeleteMatch = /^\/api\/shares\/([^/]+)$/.exec(path);
+  if (shareDeleteMatch && request.method === "DELETE") return revokeShareLink(request, env, decodeURIComponent(shareDeleteMatch[1]));
+  const publicShareMediaMatch = /^\/api\/public-share\/([^/]+)\/media\/([^/]+)$/.exec(path);
+  if (publicShareMediaMatch && request.method === "GET") return publicShareMedia(request, env, decodeURIComponent(publicShareMediaMatch[1]), decodeURIComponent(publicShareMediaMatch[2]));
+  const publicShareMatch = /^\/api\/public-share\/([^/]+)$/.exec(path);
+  if (publicShareMatch && request.method === "GET") return publicShareGet(request, env, decodeURIComponent(publicShareMatch[1]));
 
   const restoreMatch = /^\/api\/backups\/(\d+)\/restore$/.exec(path);
   if (restoreMatch && request.method === "POST") {

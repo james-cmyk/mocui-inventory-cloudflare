@@ -1,0 +1,22 @@
+'use strict';
+(() => {
+  const $=s=>document.querySelector(s);let share=null,token='';
+  function toast(text){const el=$('#toast');el.textContent=text;el.classList.add('show');clearTimeout(window.__shareToast);window.__shareToast=setTimeout(()=>el.classList.remove('show'),1800);}
+  async function copyText(text){try{await navigator.clipboard.writeText(text);toast('文案已复制');}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('文案已复制');}}
+  function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function safeFileName(name,index,type){const clean=String(name||'').replace(/[\\/:*?"<>|]/g,'_').slice(0,90);return clean||`mocui-${index+1}.${type==='video'?'mp4':'jpg'}`;}
+  async function fileFromMedia(m,index){const res=await fetch(m.url+(m.url.includes('?')?'&':'?')+'download=1',{credentials:'omit'});if(!res.ok){const b=await res.json().catch(()=>({}));throw new Error(b.error||'素材下载失败');}const blob=await res.blob();return new File([blob],safeFileName(m.name,index,m.type),{type:blob.type||m.mime||'application/octet-stream'});}
+  async function shareList(list,label){if(!list.length){toast('暂无对应素材');return;}await copyText(share.copyText||'');const files=[];try{for(let i=0;i<list.length;i++)files.push(await fileFromMedia(list[i],i));if(navigator.share&&(!navigator.canShare||navigator.canShare({files}))){await navigator.share({title:share.title,files});return;}for(const f of files){const url=URL.createObjectURL(f),a=document.createElement('a');a.href=url;a.download=f.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2500);}toast(`${label}已开始保存，文案也已复制`);}catch(e){if(e?.name==='AbortError')return;toast(e.message||'分享失败');}}
+  async function downloadOne(m,index){if(!share.allowDownload){toast('当前链接未开放下载');return;}await copyText(share.copyText||'');const url=m.url+(m.url.includes('?')?'&':'?')+'download=1';const a=document.createElement('a');a.href=url;a.download=safeFileName(m.name,index,m.type);document.body.appendChild(a);a.click();a.remove();toast('开始下载，文案已复制');}
+  function render(){
+    $('#shareTitle').textContent=share.title||'商品素材';$('#shareMeta').textContent=[share.code,share.expiresAt?`有效至 ${new Date(share.expiresAt).toLocaleDateString('zh-CN')}`:'长期有效'].filter(Boolean).join(' · ');document.title=`${share.title||'商品'} · 漠翠素材`;
+    if(share.publicPrice){$('#priceCard').textContent=share.publicPrice;$('#priceCard').classList.remove('hidden');}
+    $('#copyText').textContent=share.copyText||'暂无转发文案';$('#copyBtn').onclick=()=>copyText(share.copyText||'');
+    const media=share.media||[];$('#mediaGrid').innerHTML=media.map((m,i)=>`<article class="media-card"><div class="media-preview">${m.type==='video'?`<video src="${esc(m.url)}" controls playsinline preload="metadata"></video>`:`<img src="${esc(m.url)}" alt="" loading="lazy">`}</div><div class="media-foot"><div class="media-name">${esc(m.name||`素材${i+1}`)}</div>${share.allowDownload?`<button class="secondary-btn one-download" data-index="${i}">${m.type==='video'?'保存视频':'保存原图'} + 复制文案</button>`:''}</div></article>`).join('');
+    document.querySelectorAll('.one-download').forEach(btn=>btn.onclick=()=>downloadOne(media[Number(btn.dataset.index)],Number(btn.dataset.index)));
+    const imgs=media.filter(m=>m.type==='image'),vids=media.filter(m=>m.type==='video');$('#bulkActions').innerHTML=`${imgs.length?'<button id="shareImages" class="primary-btn">分享/保存全部原图 + 复制文案</button>':''}${vids.length?'<button id="shareVideos" class="secondary-btn">分享/保存原视频 + 复制文案</button>':''}`;if($('#shareImages'))$('#shareImages').onclick=()=>shareList(imgs,'原图');if($('#shareVideos'))$('#shareVideos').onclick=()=>shareList(vids,'视频');
+    $('#shareState').classList.add('hidden');$('#shareContent').classList.remove('hidden');
+  }
+  async function init(){token=decodeURIComponent(location.hash.slice(1));if(!token){$('#shareState').textContent='分享链接缺少访问凭证';$('#shareState').classList.add('error');return;}try{const res=await fetch(`/api/public-share/${encodeURIComponent(token)}`,{credentials:'omit',cache:'no-store'}),body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body.error||'分享链接无法打开');share=body.share;render();}catch(e){$('#shareState').textContent=e.message||'分享链接无法打开';$('#shareState').classList.add('error');}}
+  init();
+})();

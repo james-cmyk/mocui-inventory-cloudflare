@@ -20,9 +20,10 @@
   const contentOf=p=>{
     const current=p.contentHub&&typeof p.contentHub==='object'?p.contentHub:{};
     return {
-      copies:{moments:'',xhsTitle:'',xhs:'',shortVideo:'',storeTitle:'',...(current.copies||{})},
+      copies:{moments:'',xhsTitle:'',xhs:'',shortVideo:'',storeTitle:'',agent:'',...(current.copies||{})},
       publishHistory:{moments:[],xhs:[],wechatVideo:[],douyin:[],kuaishou:[],...(current.publishHistory||{})},
       repeatDays:{moments:20,xhs:30,wechatVideo:30,douyin:30,kuaishou:30,...(current.repeatDays||{})},
+      agentShares:Array.isArray(current.agentShares)?current.agentShares:[],
       createdAt:current.createdAt||new Date().toISOString(),updatedAt:current.updatedAt||new Date().toISOString(),
     };
   };
@@ -54,7 +55,7 @@
     let storeTitle=[p.name,spec,color,cat,'实物拍摄'].filter(Boolean).join(' ');
     if(storeTitle.length<16)storeTitle+=' 和田玉饰品 实拍';
     storeTitle=storeTitle.slice(0,60);
-    return {moments,xhsTitle,xhs,shortVideo,storeTitle};
+    return {moments,xhsTitle,xhs,shortVideo,storeTitle,agent:moments};
   }
   function scanRisk(text){
     const found=[];
@@ -124,6 +125,42 @@
   function dueProducts(products,platform){
     return products.filter(p=>Number(p.stock)>0).map(p=>{const d=dueState(p,platform),updated=new Date(p.updatedAt||p.createdAt||0);let score=0;if(!d.last){const age=(Date.now()-updated.getTime())/86400000;score=age<=3?100000-age:50000+age;}else score=(d.days-d.repeat)*100;return {p,d,score};}).filter(x=>x.d.due).sort((a,b)=>b.score-a.score).slice(0,10);
   }
+
+  async function shareApi(path,options={}){
+    const res=await fetch(path,{credentials:'same-origin',...options});
+    const body=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(body?.error||`请求失败 ${res.status}`);
+    return body;
+  }
+  function publicShareUrl(token){const u=new URL('/share.html',location.origin);u.hash=token;return u.toString();}
+  function shareStatus(row){
+    if(row.revokedAt)return {label:'已撤销',cls:'danger'};
+    if(row.expiresAt&&row.expiresAt<Date.now())return {label:'已过期',cls:'warn'};
+    return {label:'有效',cls:'success'};
+  }
+  async function openAgentShareManager(p,hub){
+    const ownMedia=mediaOf(p).filter(m=>ownMediaUrl(m.url));
+    const server=await shareApi(`/api/shares?productId=${encodeURIComponent(p.id)}`).catch(()=>({shares:[]}));
+    const statusMap=new Map((server.shares||[]).map(x=>[x.id,x]));
+    const localMap=new Map((hub.agentShares||[]).map(x=>[x.id,x]));
+    const history=(server.shares||[]).map(row=>({...row,url:localMap.get(row.id)?.url||''}));
+    const defaultAgent=hub.copies.agent||hub.copies.moments||defaultCopies(p).agent;
+    const retail=Number(p.salePrice||0)>0?`¥${Number(p.salePrice).toLocaleString('zh-CN',{maximumFractionDigits:2})}`:'';
+    const listHTML=history.length?history.map(row=>{const st=shareStatus(row);return `<div class="agent-share-row" data-id="${esc(row.id)}"><div class="agent-share-info"><div><strong>${esc(row.title||p.name)}</strong><span class="badge ${st.cls}">${st.label}</span></div><small>${row.createdAt?fmtDateTime(new Date(row.createdAt)):'—'} · 浏览 ${row.viewCount||0} · 下载 ${row.downloadCount||0}${row.expiresAt?` · 到期 ${fmtDateTime(new Date(row.expiresAt))}`:' · 长期有效'}</small></div><div class="agent-share-actions">${row.url&&st.label==='有效'?`<button class="btn secondary small copy-agent-link" data-url="${esc(row.url)}">复制链接</button><button class="btn secondary small system-share-agent-link" data-url="${esc(row.url)}">分享链接</button>`:''}${st.label==='有效'?`<button class="btn danger small revoke-agent-link" data-id="${esc(row.id)}">撤销</button>`:''}</div></div>`}).join(''):emptyState('↗','还没有代理分享链接','生成后代理只看到公开素材和文案');
+    openModal('代理素材分享',`<div class="notice success"><strong>安全白名单：</strong>公开页只返回商品名称、公开货号、你选择显示的价格、代理文案、原图和原视频。成本、利润、供应商、库存位置、客户、调借和销售记录不会发送给公开页面。</div><div class="form-group"><label class="form-label">代理转发文案</label><textarea id="agentShareCopy" class="textarea tall">${esc(defaultAgent)}</textarea></div><div class="form-row"><div class="form-group"><label class="form-label">价格显示</label><select id="agentPriceMode" class="select"><option value="none">不显示价格</option>${retail?`<option value="retail">零售价 ${esc(retail)}</option>`:''}<option value="custom">自定义价格/说明</option></select></div><div class="form-group"><label class="form-label">有效期</label><select id="agentExpiry" class="select"><option value="7">7天</option><option value="30" selected>30天</option><option value="90">90天</option><option value="0">长期有效</option></select></div></div><div id="agentCustomPriceWrap" class="form-group hidden"><label class="form-label">公开价格/说明</label><input id="agentCustomPrice" class="input" placeholder="如：代理价私询 / ¥12800"></div><label class="check-line"><input id="agentAllowDownload" type="checkbox" checked> 允许代理下载原图和原视频</label><div class="notice">当前可分享自有素材：${ownMedia.filter(x=>x.type==='image').length} 张原图 · ${ownMedia.filter(x=>x.type==='video').length} 个原视频。${ownMedia.length?'':'请先把图片/视频上传或转存到自己的 R2。'}</div><button id="createAgentShare" class="btn block" ${ownMedia.length?'':'disabled'}>生成安全代理链接</button><div id="createdAgentShare" class="agent-created-link hidden"></div><div class="section-title">已有链接 <small>${history.length}</small></div><div id="agentShareHistory">${listHTML}</div>`,{onOpen:()=>{
+      const mode=$('#agentPriceMode');mode.onchange=()=>$('#agentCustomPriceWrap').classList.toggle('hidden',mode.value!=='custom');
+      $('#createAgentShare').onclick=async()=>{try{
+        const text=$('#agentShareCopy').value.trim();
+        let publicPrice='';if(mode.value==='retail')publicPrice=retail;else if(mode.value==='custom')publicPrice=$('#agentCustomPrice').value.trim();
+        const result=await shareApi('/api/shares',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:p.id,title:p.name,code:p.code||'',publicPrice,copyText:text,expiresDays:Number($('#agentExpiry').value||0),allowDownload:$('#agentAllowDownload').checked,media:ownMedia.map(m=>({url:m.url,type:m.type,name:m.name,mime:m.mime}))})});
+        const url=publicShareUrl(result.token);hub.copies.agent=text;hub.agentShares=[{id:result.id,url,createdAt:new Date(result.createdAt).toISOString(),expiresAt:result.expiresAt||null},...(hub.agentShares||[]).filter(x=>x.id!==result.id)].slice(0,100);await saveProductContent(p,hub);
+        const box=$('#createdAgentShare');box.classList.remove('hidden');box.innerHTML=`<strong>链接已生成</strong><input id="newAgentShareUrl" class="input" readonly value="${esc(url)}"><div class="btn-row"><button id="copyNewAgentLink" class="btn secondary small">复制链接</button><button id="shareNewAgentLink" class="btn small">发给代理</button></div>`;$('#copyNewAgentLink').onclick=()=>copyText(url);$('#shareNewAgentLink').onclick=async()=>{if(navigator.share){try{await navigator.share({title:p.name,text:'商品原图/视频与转发文案',url});return;}catch(e){if(e?.name==='AbortError')return;}}await copyText(url);showToast('链接已复制');};showToast('代理分享链接已生成');
+      }catch(err){showToast(err.message);}};
+      $$('.copy-agent-link').forEach(btn=>btn.onclick=()=>copyText(btn.dataset.url));
+      $$('.system-share-agent-link').forEach(btn=>btn.onclick=async()=>{const url=btn.dataset.url;if(navigator.share){try{await navigator.share({title:p.name,url});return;}catch(e){if(e?.name==='AbortError')return;}}await copyText(url);});
+      $$('.revoke-agent-link').forEach(btn=>btn.onclick=async()=>{if(!await confirmDialog('撤销后代理立即无法继续访问这个链接，确定撤销？'))return;try{await shareApi(`/api/shares/${encodeURIComponent(btn.dataset.id)}`,{method:'DELETE'});hub.agentShares=(hub.agentShares||[]).filter(x=>x.id!==btn.dataset.id);await saveProductContent(p,hub);showToast('分享链接已撤销');closeModal();await openAgentShareManager(p,hub);}catch(err){showToast(err.message);}});
+    }});
+  }
   async function renderContentHub(){
     setHeader('内容工作台','今日待发、重复曝光与素材复用');const products=await dbAll('products');const moments=dueProducts(products,'moments'),xhs=dueProducts(products,'xhs');
     $('#main').innerHTML=`<div class="content-hub-summary"><div class="metric"><div class="label">朋友圈建议</div><div class="value">${moments.length}</div><div class="hint">默认20天循环</div></div><div class="metric"><div class="label">小红书建议</div><div class="value">${xhs.length}</div><div class="hint">默认30天循环</div></div></div><div class="notice">优先显示仍有库存、从未发布或已达到重复发布周期的商品。第一期每天最多推荐10件，避免待办太长。</div><div class="section-title">今日朋友圈 <small>${moments.length} 件</small></div><div class="list">${moments.map(x=>contentDueItem(x.p,x.d,'moments')).join('')||emptyState('✓','今天暂无到期商品')}</div><div class="section-title">今日小红书 <small>${xhs.length} 件</small></div><div class="list">${xhs.map(x=>contentDueItem(x.p,x.d,'xhs')).join('')||emptyState('✓','今天暂无到期商品')}</div>`;
@@ -136,7 +173,7 @@
     const renderPage=async()=>{
       const media=mediaOf(p),images=media.filter(m=>m.type==='image'),videos=media.filter(m=>m.type==='video'),externalCover=p.image&&!ownMediaUrl(p.image)&&!media.some(m=>m.url===p.image);
       $('#main').innerHTML=`<div class="content-product-head"><div class="content-product-cover">${p.image?`<img src="${esc(p.image)}" alt="">`:'玉'}</div><div><strong>${esc(p.name)}</strong><span>${esc(p.code)} · 库存 ${fmtInt(p.stock)}</span><span>${productMediaSummary(p)}</span></div></div>
-      <div class="section-title">商品素材 <small>图片与视频上传一次，后续重复使用</small></div><div class="card"><label class="content-upload-zone" for="contentMediaInput"><strong>＋ 上传图片 / 视频</strong><span>图片单张≤25MB；视频单个≤95MB</span></label><input id="contentMediaInput" class="hidden" type="file" accept="image/*,video/*" multiple><div id="contentUploadStatus" class="item-meta" style="margin-top:8px"></div>${externalCover?`<div class="notice warn" style="margin-top:10px">当前主图来自秦丝外链。<button id="importLegacyCover" class="link-button">转存到自己的R2素材库</button></div>`:''}<div class="content-media-grid">${media.map(m=>mediaCard(m,p)).join('')||emptyState('▧','还没有自有素材','上传后会保存在 Cloudflare R2')}</div><div class="notice" style="margin-top:10px"><strong>素材规则：</strong>朋友圈、代理转图、小红书笔记和普通分享一律使用原图；只有小红书店铺商品图需要时才生成裁切版。</div><div class="content-media-tools"><button id="shareImages" class="btn secondary">保存/分享原图</button><button id="shareVideos" class="btn secondary">保存/分享原视频</button><button id="export34" class="btn secondary">店铺图 3:4</button><button id="export11" class="btn secondary">店铺图 1:1</button></div></div>
+      <div class="section-title">商品素材 <small>图片与视频上传一次，后续重复使用</small></div><div class="card"><label class="content-upload-zone" for="contentMediaInput"><strong>＋ 上传图片 / 视频</strong><span>图片单张≤25MB；视频单个≤95MB</span></label><input id="contentMediaInput" class="hidden" type="file" accept="image/*,video/*" multiple><div id="contentUploadStatus" class="item-meta" style="margin-top:8px"></div>${externalCover?`<div class="notice warn" style="margin-top:10px">当前主图来自秦丝外链。<button id="importLegacyCover" class="link-button">转存到自己的R2素材库</button></div>`:''}<div class="content-media-grid">${media.map(m=>mediaCard(m,p)).join('')||emptyState('▧','还没有自有素材','上传后会保存在 Cloudflare R2')}</div><div class="notice" style="margin-top:10px"><strong>素材规则：</strong>朋友圈、代理转图、小红书笔记和普通分享一律使用原图；只有小红书店铺商品图需要时才生成裁切版。</div><div class="content-media-tools"><button id="shareImages" class="btn secondary">保存/分享原图</button><button id="shareVideos" class="btn secondary">保存/分享原视频</button><button id="export34" class="btn secondary">店铺图 3:4</button><button id="export11" class="btn secondary">店铺图 1:1</button></div><button id="agentShareCenter" class="btn block agent-share-entry">生成代理素材分享链接</button><div class="item-meta" style="margin-top:7px">代理页只显示公开素材和文案，不显示成本、利润、供应商、库存位置或业务记录。</div></div>
       <div class="section-title">文案助手 <small>第一期使用本地模板，可手动修改</small></div><div class="card"><div class="btn-row"><button id="regenCopies" class="btn secondary small">根据商品重新生成</button><button id="scanXhs" class="btn secondary small">检测小红书风险词</button></div><div class="form-group"><label class="form-label">朋友圈文案</label><textarea id="momentsCopy" class="textarea content-copy-area">${esc(hub.copies.moments)}</textarea><button class="copy-inline" data-copy="momentsCopy">复制朋友圈文案</button></div><div class="form-group"><label class="form-label">小红书标题</label><input id="xhsTitleCopy" class="input" value="${esc(hub.copies.xhsTitle)}"><div class="char-count"><span id="xhsTitleCount">${hub.copies.xhsTitle.length}</span> 字</div></div><div class="form-group"><label class="form-label">小红书正文 + 话题</label><textarea id="xhsCopy" class="textarea content-copy-area tall">${esc(hub.copies.xhs)}</textarea><button class="copy-inline" data-copy="xhsCopy">复制小红书文案</button><div id="xhsRiskBox">${riskHTML(hub.copies.xhsTitle+'\n'+hub.copies.xhs)}</div></div><div class="form-group"><label class="form-label">短视频文案（视频号/抖音/快手）</label><textarea id="shortVideoCopy" class="textarea content-copy-area">${esc(hub.copies.shortVideo)}</textarea><button class="copy-inline" data-copy="shortVideoCopy">复制短视频文案</button></div><div class="form-group"><label class="form-label">小红书店铺标题</label><input id="storeTitleCopy" class="input" value="${esc(hub.copies.storeTitle)}"><div class="char-count"><span id="storeTitleCount">${hub.copies.storeTitle.length}</span> 字</div><button class="copy-inline" data-copy="storeTitleCopy">复制店铺标题</button></div><button id="saveCopies" class="btn block">保存文案</button></div>
       <div class="section-title">发布记录 <small>记录后自动计算下次重复发布时间</small></div><div class="card content-platform-list">${Object.entries(PLATFORM_CONFIG).map(([key,cfg])=>platformRow(p,hub,key,cfg)).join('')}</div>`;
       bindContentPage();
@@ -151,6 +188,7 @@
       $('#shareVideos').onclick=async()=>shareMediaList(mediaOf(p).filter(m=>m.type==='video'),p).catch(e=>showToast(e.message));
       const exportRatio=async ratio=>{const list=mediaOf(p).filter(m=>m.type==='image');if(!list.length){showToast('请先上传自有图片');return;}const files=[];try{for(const m of list.slice(0,9))files.push(await cropFileFromMedia(m,ratio,ratio===.75?'xhs-store-3x4':'xhs-store-1x1'));await shareFiles(files,`${p.name} · 小红书店铺 ${ratio===.75?'3:4':'1:1'}`);}catch(e){showToast(e.message);}};
       $('#export34').onclick=()=>exportRatio(.75);$('#export11').onclick=()=>exportRatio(1);
+      $('#agentShareCenter').onclick=()=>openAgentShareManager(p,hub).catch(e=>showToast(e.message));
       $$('.copy-inline').forEach(btn=>btn.onclick=()=>copyText($('#'+btn.dataset.copy).value));
       const updateCounts=()=>{$('#xhsTitleCount').textContent=$('#xhsTitleCopy').value.length;$('#storeTitleCount').textContent=$('#storeTitleCopy').value.length;};$('#xhsTitleCopy').oninput=updateCounts;$('#storeTitleCopy').oninput=updateCounts;
       $('#scanXhs').onclick=()=>{$('#xhsRiskBox').innerHTML=riskHTML($('#xhsTitleCopy').value+'\n'+$('#xhsCopy').value);};
