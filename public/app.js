@@ -425,8 +425,7 @@ async function renderProducts(){
       <div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(qty)}</div></div>
       <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(cost)}</div></div>
     </div>
-    <div class="toolbar" style="margin-top:12px"><div class="search"><input id="productSearch" placeholder="名称、编码、颜色模糊搜索"></div><select id="categoryFilter" class="filter-select"><option value="">全部分类</option>${categories.map(c=>`<option>${esc(c.name)}</option>`).join('')}</select></div>
-    <div class="toolbar"><select id="stockFilter" class="filter-select" style="max-width:none;flex:1"><option value="">全部库存状态</option><option value="in">有库存</option><option value="low">低库存（≤1）</option><option value="out">无库存</option></select><div style="flex:1"></div></div>
+    <div class="product-filter-row" style="margin-top:12px"><div class="search"><input id="productSearch" placeholder="名称 / 编码 / 颜色"></div><select id="categoryFilter" class="filter-select"><option value="">全部分类</option>${categories.map(c=>`<option>${esc(c.name)}</option>`).join('')}</select><select id="stockFilter" class="filter-select"><option value="">全部库存状态</option><option value="in">有库存</option><option value="low">低库存（≤1）</option><option value="out">无库存</option></select></div>
     <div class="btn-row" style="margin-bottom:10px"><button class="btn secondary small" id="batchImport">批量上传</button><button class="btn secondary small" id="manageCategory">分类管理</button><button class="btn secondary small" id="exportProducts">导出商品</button></div>
     <div id="productList" class="list"></div>`;
   const draw=()=>{

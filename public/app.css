@@ -110,7 +110,7 @@ button,.btn,.nav-item,.list-item.clickable{touch-action:manipulation}
 .btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
 .input,.select,.textarea{font-size:16px}
 .input,.select,.textarea,.btn{min-height:44px}
-.topbar,.bottom-nav{transform:translateZ(0)}
+.topbar{transform:translateZ(0)}
 body.keyboard-open{padding-bottom:18px}
 /* Dock 固定在同一基线；键盘出现时仅淡出，避免 iOS 误判造成整栏上下跳动。 */
 .bottom-nav{bottom:0!important;transition:opacity .16s ease,visibility .16s ease;will-change:opacity;backface-visibility:hidden}
@@ -132,3 +132,51 @@ html[data-initial-sync="pending"] .cloud-badge{background:#eff8ff;border-color:#
 
 /* v2.8 秦丝数据导入中心 */
 .qinsilk-upload{min-height:106px;font-size:14px;font-weight:750}.qinsilk-upload small{display:block;margin-top:5px;color:var(--muted);font-size:11px;font-weight:500}.qinsilk-file-card{overflow:hidden}.qinsilk-file-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.import-file-error{border-color:#fecdca}.import-stats{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.qinsilk-preview{margin-top:10px;padding:9px 11px;border-radius:11px;background:#f9fafb;color:#475467;font-size:10px;line-height:1.7;overflow:hidden}.qinsilk-preview div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.compact-notice{padding:8px 10px;margin-top:9px;font-size:10px}.rule-list{display:flex;flex-direction:column;gap:10px}.rule-list>div{display:grid;grid-template-columns:56px 1fr;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}.rule-list>div:last-child{border-bottom:0;padding-bottom:0}.rule-list strong{font-size:12px}.rule-list span{font-size:11px;color:var(--muted);line-height:1.55}.import-progress{height:8px;border-radius:999px;background:#eaecf0;overflow:hidden;margin-top:12px}.import-progress>div{height:100%;width:0;background:var(--success);transition:width .2s ease}.qinsilk-file-card .badge{font-size:9px}
+
+
+/* v2.9.2：统一 iPhone PWA Dock 高度 + 商品筛选一行 */
+html,body,#app{min-height:100%;min-height:100dvh}
+body{min-height:100dvh}
+#app{position:relative}
+.main{min-height:calc(100dvh - 170px)}
+
+/* iOS WebKit 在短页面与长页面之间切换时，合成层可能让 fixed Dock 锚点变化。
+   Dock 不再单独启用 translateZ 合成层，始终固定到动态视口底部。 */
+.topbar{transform:translateZ(0)}
+@media(max-width:759px){
+  .bottom-nav{
+    position:fixed!important;
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    top:auto!important;
+    transform:none!important;
+    margin:0!important;
+    width:100%!important;
+    max-width:none!important;
+  }
+}
+
+.product-filter-row{
+  display:grid;
+  grid-template-columns:minmax(0,1.75fr) minmax(92px,.86fr) minmax(116px,1.05fr);
+  gap:8px;
+  align-items:center;
+  margin-bottom:10px;
+}
+.product-filter-row .search{min-width:0}
+.product-filter-row .search input{height:42px;font-size:14px;padding-right:8px}
+.product-filter-row .filter-select{
+  width:100%;
+  max-width:none;
+  min-width:0;
+  height:42px;
+  padding:0 26px 0 9px;
+  font-size:13px;
+  text-overflow:ellipsis;
+}
+@media(max-width:380px){
+  .product-filter-row{grid-template-columns:minmax(0,1.6fr) 88px 108px;gap:6px}
+  .product-filter-row .filter-select{font-size:12px;padding-left:7px;padding-right:20px}
+  .product-filter-row .search input{font-size:13px}
+}

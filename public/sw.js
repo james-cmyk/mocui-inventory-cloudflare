@@ -1,4 +1,4 @@
-const CACHE='mocui-inventory-pwa-v2-9-0';
+const CACHE='mocui-inventory-pwa-v2-9-2';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -45,4 +45,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// Dock stability patch v2.9.1
+// Layout and Dock stability patch v2.9.2
