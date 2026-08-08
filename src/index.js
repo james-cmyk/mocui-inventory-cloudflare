@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;

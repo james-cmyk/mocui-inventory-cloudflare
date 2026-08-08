@@ -1,4 +1,4 @@
-const CACHE='mocui-inventory-pwa-v3-1-agent-share';
+const CACHE='mocui-inventory-pwa-v3-2-content-feed';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.1 代理素材分享页与独立导航缓存
+// v3.2 微购式内容商品流、自动分享记录、小红书标签与店铺图适配
