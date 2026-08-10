@@ -205,6 +205,10 @@
     const blob=new Blob(chunks,{type:res.headers.get('content-type')||typeHint||'application/octet-stream'});onProgress(1);return new File([blob],name,{type:blob.type});
   }
   function triggerBrowserDownload(file){const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
+  let preparedInlineSave=null;
+  function preparedKey(p,store11=false){return `${p.id||p.code||'product'}:${store11?'store11':'all'}`;}
+  function clearPreparedInlineSave(){preparedInlineSave=null;}
+  function preparedSummary(files){const images=files.filter(f=>String(f.type||'').startsWith('image/')).length,videos=files.filter(f=>String(f.type||'').startsWith('video/')).length;return images&&videos?`${images}图+${videos}视频`:images?`${images}张`:`${videos}视频`;}
   async function systemSaveFiles(files,title='商品素材'){
     if(!files.length)throw new Error('暂无可保存素材');
     if(navigator.share&&(!navigator.canShare||navigator.canShare({files}))){
@@ -213,6 +217,40 @@
     }
     if(files.length===1){triggerBrowserDownload(files[0]);return true;}
     throw new Error('当前浏览器不支持一次保存多张，请使用 iPhone Safari/PWA 的系统分享菜单');
+  }
+  function setInlineActionProgress(btn,percent,label='准备'){
+    if(!btn)return;const p=Math.max(0,Math.min(100,Math.round(percent)));btn.disabled=true;btn.classList.add('inline-download-busy');btn.innerHTML=`<span class="inline-download-ring" style="--p:${p}"><i>${p}</i></span><span>${esc(label)}</span>`;
+  }
+  function setInlineActionReady(btn,files,store11=false){
+    if(!btn)return;btn.disabled=false;btn.classList.remove('inline-download-busy');btn.classList.add('inline-download-ready');btn.dataset.prepared='1';btn.innerHTML=`<span class="inline-ready-dot">✓</span>${store11?'保存1:1':`保存${files.length}项`}`;
+  }
+  function restoreInlineAction(btn,store11=false){
+    if(!btn)return;btn.disabled=false;btn.classList.remove('inline-download-busy','inline-download-ready');delete btn.dataset.prepared;btn.textContent=store11?'店铺1:1':'下载';
+  }
+  async function prepareInlineFiles(list,p,{store11=false,btn,title='商品素材'}={}){
+    if(!list.length){showToast(store11?'暂无可生成的商品图片':'暂无可下载的图片或视频');return;}
+    const key=preparedKey(p,store11);
+    if(preparedInlineSave?.key===key&&preparedInlineSave.files?.length&&Date.now()-preparedInlineSave.at<120000){
+      try{await systemSaveFiles(preparedInlineSave.files,title);showToast(`已打开系统保存，共 ${preparedInlineSave.files.length} 项`);clearPreparedInlineSave();restoreInlineAction(btn,store11);}catch(e){if(e?.name!=='AbortError')showToast(e.message);}
+      return;
+    }
+    clearPreparedInlineSave();setInlineActionProgress(btn,0,store11?'生成1:1':'准备素材');
+    try{
+      const files=[];
+      for(let i=0;i<list.length;i++){
+        const m=list[i],base=i/list.length,span=1/list.length;
+        let f;
+        if(store11){
+          setInlineActionProgress(btn,base*100,'生成1:1');
+          f=await fitFileFromMedia(m,1,`${p.code||'mocui'}-store-1x1-${String(i+1).padStart(2,'0')}`);
+          setInlineActionProgress(btn,(base+span)*100,'生成1:1');
+        }else{
+          f=await fetchFileWithProgress(m.url,m.name||`${p.code||'mocui'}-${i+1}.${m.type==='video'?'mp4':'jpg'}`,m.mime||'',x=>setInlineActionProgress(btn,(base+x*span)*100,'准备素材'));
+        }
+        files.push(f);
+      }
+      preparedInlineSave={key,files,at:Date.now(),title,store11};setInlineActionReady(btn,files,store11);showToast(`${preparedSummary(files)}已准备，再点一次即可保存到相册`);
+    }catch(e){restoreInlineAction(btn,store11);showToast(e.message);throw e;}
   }
   function preparedSaveHTML(files,title,store11=false){
     const images=files.filter(f=>String(f.type||'').startsWith('image/')).length,videos=files.filter(f=>String(f.type||'').startsWith('video/')).length;
@@ -337,17 +375,10 @@
   function feedCard(p){
     const hub=contentOf(p), videos=mediaOf(p).filter(m=>m.type==='video'), moments=relativePublished(hub,'moments'), xhs=relativePublished(hub,'xhs'), dueM=dueState(p,'moments').due, dueX=dueState(p,'xhs').due, hasShared=Boolean(lastPublished(hub,'moments')||lastPublished(hub,'xhs'));
     const preview=(hub.copies.moments||defaultCopies(p).moments).split('\n').filter(Boolean)[0]||'';
-    return `<article class="workbench-product-card" data-id="${esc(p.id)}"><div class="workbench-product-row"><div class="workbench-thumb">${p.image?`<img src="${esc(p.image)}" alt="">`:'<span>玉</span>'}${videos.length?'<i class="workbench-play">▶</i>':''}</div><div class="workbench-product-main"><strong>${esc(p.name)}</strong><span>${esc(p.code||'')} · ${productMediaSummary(p)}</span>${Number(p.salePrice)>0?`<b>${fmtMoney(p.salePrice)}</b>`:''}<small>${esc(preview)}</small></div><button class="workbench-share-main" data-action="share" data-id="${esc(p.id)}">${hasShared&&(dueM||dueX)?'重发':'分享'}</button></div><div class="workbench-status"><span class="${dueM?'due':''}">朋友圈 ${moments}</span><span class="${dueX?'due':''}">小红书 ${xhs}</span></div><div class="workbench-actions"><button data-action="download" data-id="${esc(p.id)}">下载</button><button data-action="copy" data-id="${esc(p.id)}">文案</button><button data-action="edit" data-id="${esc(p.id)}">编辑</button><button data-action="share" data-id="${esc(p.id)}">分享</button></div></article>`;
+    return `<article class="workbench-product-card" data-id="${esc(p.id)}"><div class="workbench-product-row"><div class="workbench-thumb">${p.image?`<img src="${esc(p.image)}" alt="">`:'<span>玉</span>'}${videos.length?'<i class="workbench-play">▶</i>':''}</div><div class="workbench-product-main"><strong>${esc(p.name)}</strong><span>${esc(p.code||'')} · ${productMediaSummary(p)}</span>${Number(p.salePrice)>0?`<b>${fmtMoney(p.salePrice)}</b>`:''}<small>${esc(preview)}</small></div><button class="workbench-share-main" data-action="share" data-id="${esc(p.id)}">${hasShared&&(dueM||dueX)?'重发':'分享'}</button></div><div class="workbench-status"><span class="${dueM?'due':''}">朋友圈 ${moments}</span><span class="${dueX?'due':''}">小红书 ${xhs}</span></div><div class="workbench-actions"><button data-action="download" data-id="${esc(p.id)}">下载</button><button data-action="store11" data-id="${esc(p.id)}">店铺1:1</button><button data-action="copy" data-id="${esc(p.id)}">文案</button><button data-action="edit" data-id="${esc(p.id)}">编辑</button><button data-action="share" data-id="${esc(p.id)}">分享</button></div></article>`;
   }
   function historyCards(products){
     const rows=[];for(const p of products){const hub=contentOf(p);for(const key of Object.keys(PLATFORM_CONFIG)){for(const evt of hub.publishHistory[key]||[]){const at=new Date(evt.at||evt);if(!Number.isNaN(at.getTime()))rows.push({p,key,at});}}}rows.sort((a,b)=>b.at-a.at);return rows.slice(0,120).map(row=>`<div class="workbench-history-row"><div class="workbench-history-thumb">${row.p.image?`<img src="${esc(row.p.image)}" alt="">`:'玉'}</div><div><strong>${esc(row.p.name)}</strong><span>${PLATFORM_CONFIG[row.key]?.label||row.key} · ${fmtDateTime(row.at)}</span></div><button class="workbench-open" data-id="${esc(row.p.id)}">›</button></div>`).join('')||emptyState('◷','还没有分享记录','从内容工作台发起分享后会自动记录时间');
-  }
-  async function openWorkbenchDownload(p){
-    openModal('下载素材',`<div class="workbench-sheet-product"><strong>${esc(p.name)}</strong><span>原图原视频不裁切；店铺图只保留 1:1</span></div><div class="workbench-sheet-grid three"><button id="wbDlImages"><i>图</i><strong>全部原图</strong><span>一次保存全部</span></button><button id="wbDlVideo"><i>▶</i><strong>原视频</strong><span>原画质</span></button><button id="wbDl11"><i>1:1</i><strong>店铺 1:1</strong><span>全部图片生成</span></button></div><div class="item-meta" style="margin-top:10px">准备完成后一次性交给 iPhone 系统分享菜单，可选择“存储多张图像”，不再逐张预览。</div>`,{onOpen:()=>{
-      $('#wbDlImages').onclick=async()=>{closeModal();await prepareDownload(mediaOf(p).filter(m=>m.type==='image'),p,{title:'全部原图'}).catch(()=>{});};
-      $('#wbDlVideo').onclick=async()=>{closeModal();await prepareDownload(mediaOf(p).filter(m=>m.type==='video').slice(0,1),p,{title:'原视频'}).catch(()=>{});};
-      $('#wbDl11').onclick=async()=>{closeModal();await prepareDownload(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,title:'店铺1:1'}).catch(()=>{});};
-    }});
   }
   async function openWorkbenchCopy(p){
     const hub=contentOf(p);if(!Object.values(hub.copies).some(Boolean)){hub.copies={...hub.copies,...defaultCopies(p)};await saveProductContent(p,hub);}const opt=applyXhsTagOptimization(p,hub,hub.copies.xhsTitle,hub.copies.xhs);
@@ -380,7 +411,7 @@
       rows.sort((a,b)=>{const ad=todayIds.has(a.id)?1:0,bd=todayIds.has(b.id)?1:0;return bd-ad||latestActivityAt(b)-latestActivityAt(a);});
       const visible=rows.slice(0,limit),due=(filter==='all'&&!q)?visible.filter(p=>todayIds.has(p.id)):[],rest=visible.filter(p=>!due.includes(p));body.innerHTML=`${due.length?`<div class="workbench-group-title"><strong>今日推荐</strong><span>${due.length}件</span></div>${due.map(feedCard).join('')}`:''}${rest.length?`<div class="workbench-group-title"><strong>${q||filter!=='all'?'筛选结果':'最近商品'}</strong><span>${rest.length}件</span></div>${rest.map(feedCard).join('')}`:''}${!visible.length?emptyState('⌕','没有符合条件的商品'):''}${rows.length>limit?'<button id="workbenchLoadMore" class="btn secondary block">加载更多</button>':''}`;
       if($('#workbenchLoadMore'))$('#workbenchLoadMore').onclick=()=>{limit+=80;draw();};
-      $$('.workbench-product-card [data-action]').forEach(btn=>btn.onclick=async e=>{e.stopPropagation();const p=byId.get(btn.dataset.id);if(!p)return;const action=btn.dataset.action;if(action==='edit')navigate('product-content',{id:p.id});else if(action==='download')await openWorkbenchDownload(p);else if(action==='copy')await openWorkbenchCopy(p);else if(action==='share')await openWorkbenchShare(p);});
+      $$('.workbench-product-card [data-action]').forEach(btn=>btn.onclick=async e=>{e.stopPropagation();const p=byId.get(btn.dataset.id);if(!p)return;const action=btn.dataset.action;if(action==='edit')navigate('product-content',{id:p.id});else if(action==='download')await prepareInlineFiles(mediaOf(p),p,{btn,title:p.name});else if(action==='store11')await prepareInlineFiles(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,btn,title:`${p.name} 店铺1:1`});else if(action==='copy')await openWorkbenchCopy(p);else if(action==='share')await openWorkbenchShare(p);});
     };
     $$('.workbench-tabs button').forEach(btn=>btn.onclick=()=>{tab=btn.dataset.tab;$$('.workbench-tabs button').forEach(x=>x.classList.toggle('active',x===btn));draw();});
     $('#workbenchSearch').oninput=e=>{query=e.target.value;limit=80;draw();};
@@ -393,7 +424,7 @@
     const renderPage=async()=>{
       const media=mediaOf(p),images=media.filter(m=>m.type==='image'),videos=media.filter(m=>m.type==='video'),externalCover=p.image&&!ownMediaUrl(p.image)&&!media.some(m=>m.url===p.image);
       $('#main').innerHTML=`<div class="content-product-head"><div class="content-product-cover">${p.image?`<img src="${esc(p.image)}" alt="">`:'玉'}</div><div><strong>${esc(p.name)}</strong><span>${esc(p.code)} · 库存 ${fmtInt(p.stock)}</span><span>${productMediaSummary(p)}</span></div></div>
-      <div class="section-title">产品素材与发布 <small>像发朋友圈一样：先选素材，再粘贴文案</small></div><div class="card moments-compose-card"><div class="moments-compose-head"><strong>${esc(p.name)}</strong><span>${esc(p.code)} · 库存 ${fmtInt(p.stock)}</span></div><label class="moments-upload-button" for="contentMediaInput"><span>＋</span><strong>上传图片 / 视频</strong><small>支持多选</small></label><input id="contentMediaInput" class="hidden" type="file" accept="image/*,video/*" multiple><div id="contentUploadStatus" class="item-meta moments-upload-status"></div>${externalCover?`<div class="notice warn" style="margin-top:10px">当前主图来自秦丝外链。<button id="importLegacyCover" class="link-button">转存到自己的R2素材库</button></div>`:''}<div class="content-media-grid moments-media-grid">${media.map(m=>mediaCard(m,p)).join('')||emptyState('▧','还没有素材','点击上方“上传图片 / 视频”')}</div><div class="moments-copy-box"><label>朋友圈文案</label><textarea id="momentsCopy" class="textarea content-copy-area" placeholder="把今天的朋友圈文案直接粘贴在这里">${esc(hub.copies.moments)}</textarea><button class="copy-inline" data-copy="momentsCopy">复制文案</button></div><div class="content-media-tools three"><button id="shareImages" class="btn secondary">保存全部原图</button><button id="shareVideos" class="btn secondary">保存原视频</button><button id="export11" class="btn secondary">店铺 1:1 全部</button></div><div class="item-meta">原图/原视频始终保留；店铺图只生成 1:1 完整构图适配副本。</div><button id="agentShareCenter" class="btn block agent-share-entry">生成代理素材分享链接</button></div>
+      <div class="section-title">产品素材与发布 <small>像发朋友圈一样：先选素材，再粘贴文案</small></div><div class="card moments-compose-card"><div class="moments-compose-head"><strong>${esc(p.name)}</strong><span>${esc(p.code)} · 库存 ${fmtInt(p.stock)}</span></div><label class="moments-upload-button" for="contentMediaInput"><span>＋</span><strong>上传图片 / 视频</strong><small>支持多选</small></label><input id="contentMediaInput" class="hidden" type="file" accept="image/*,video/*" multiple><div id="contentUploadStatus" class="item-meta moments-upload-status"></div>${externalCover?`<div class="notice warn" style="margin-top:10px">当前主图来自秦丝外链。<button id="importLegacyCover" class="link-button">转存到自己的R2素材库</button></div>`:''}<div class="content-media-grid moments-media-grid">${media.map(m=>mediaCard(m,p)).join('')||emptyState('▧','还没有素材','点击上方“上传图片 / 视频”')}</div><div class="moments-copy-box"><label>朋友圈文案</label><textarea id="momentsCopy" class="textarea content-copy-area" placeholder="把今天的朋友圈文案直接粘贴在这里">${esc(hub.copies.moments)}</textarea><button class="copy-inline" data-copy="momentsCopy">复制文案</button></div><div class="content-media-tools two"><button id="shareAllMedia" class="btn secondary">下载原图 + 视频</button><button id="export11" class="btn secondary">店铺 1:1</button></div><div class="item-meta">下载会把该商品全部原图和原视频一起准备；店铺 1:1 仅生成完整构图适配副本。</div><button id="agentShareCenter" class="btn block agent-share-entry">生成代理素材分享链接</button></div>
       <div class="section-title">文案助手 <small>朋友圈文案作为母稿，一键生成平台文案</small></div><div class="card"><div class="btn-row"><button id="generateFromMoments" class="btn small">根据朋友圈文案生成</button><button id="scanXhs" class="btn secondary small">检测小红书风险词</button></div><div class="form-group"><label class="form-label">小红书标题</label><input id="xhsTitleCopy" class="input" value="${esc(hub.copies.xhsTitle)}"><div class="title-spec-row"><span>标题建议 12–20 字，超过20字会预警</span><b id="xhsTitleSpec"><span id="xhsTitleCount">${charCount(hub.copies.xhsTitle)}</span>/20</b></div></div><div class="form-group"><label class="form-label">小红书正文 + 话题</label><textarea id="xhsCopy" class="textarea content-copy-area tall">${esc(hub.copies.xhs)}</textarea><button class="copy-inline" data-copy="xhsCopy">复制小红书文案</button><div id="xhsRiskBox">${riskHTML(hub.copies.xhsTitle+'\n'+hub.copies.xhs)}</div><div class="xhs-tag-panel"><div><strong>相关热门标签</strong><button id="refreshXhsTags" class="link-button">重新分析</button></div><div id="xhsTagChips" class="xhs-tag-chips">${xhsTagsHTML(analyzeXhsTags(p,hub.copies.xhsTitle+' '+hub.copies.xhs))}</div><small>根据朋友圈母稿、商品资料和当前文案匹配相关词；实时热度仍以小红书社区热搜词为准。</small></div></div><div class="form-group"><label class="form-label">短视频文案（抖音/快手）</label><textarea id="shortVideoCopy" class="textarea content-copy-area">${esc(hub.copies.shortVideo)}</textarea><button class="copy-inline" data-copy="shortVideoCopy">复制短视频文案</button></div><div class="form-group"><label class="form-label">小红书店铺标题</label><input id="storeTitleCopy" class="input" value="${esc(hub.copies.storeTitle)}"><div class="char-count"><span id="storeTitleCount">${charCount(hub.copies.storeTitle)}</span> 字</div><button class="copy-inline" data-copy="storeTitleCopy">复制店铺标题</button></div><button id="saveCopies" class="btn block">保存文案</button></div>
       <div class="section-title">分享记录 <small>点击平台分享后自动记录，无需再点“已发”</small></div><div class="card content-platform-list">${Object.entries(PLATFORM_CONFIG).map(([key,cfg])=>platformRow(p,hub,key,cfg)).join('')}</div>`;
       bindContentPage();
@@ -404,9 +435,8 @@
       if($('#importLegacyCover'))$('#importLegacyCover').onclick=async()=>{try{const result=await importQinsilkImage(p.image,p.id);p.media=[...mediaOf(p),{id:crypto.randomUUID(),type:'image',name:'秦丝主图',mime:result.mime,size:result.size||0,url:result.url,createdAt:new Date().toISOString()}];p.image=result.url;await dbPut('products',p);showToast('主图已转存到自己的R2');await renderPage();}catch(err){showToast(err.message);}};
       $$('.set-cover').forEach(btn=>btn.onclick=async()=>{const m=mediaOf(p).find(x=>x.id===btn.dataset.id);if(!m)return;p.image=m.url;p.updatedAt=new Date().toISOString();await dbPut('products',p);showToast('封面已更新');await renderPage();});
       $$('.remove-media').forEach(btn=>btn.onclick=async()=>{const m=mediaOf(p).find(x=>x.id===btn.dataset.id);if(!m)return;if(!await confirmDialog('从该商品移除这份素材？已上传到自有R2的文件也会删除。'))return;try{await deleteMediaUrl(m.url);}catch(_){/* 引用仍会移除 */}p.media=mediaOf(p).filter(x=>x.id!==m.id);if(p.image===m.url)p.image=p.media.find(x=>x.type==='image')?.url||'';await dbPut('products',p);await renderPage();});
-      $('#shareImages').onclick=async()=>{const list=mediaOf(p).filter(m=>m.type==='image');if(!list.length&&p.image&&!ownMediaUrl(p.image)){showToast('请先把秦丝外链主图转存到自己的R2');return;}await prepareDownload(list,p,{title:'全部原图'}).catch(()=>{});};
-      $('#shareVideos').onclick=async()=>prepareDownload(mediaOf(p).filter(m=>m.type==='video'),p,{title:'原视频'}).catch(()=>{});
-      $('#export11').onclick=async()=>prepareDownload(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,title:'店铺1:1'}).catch(()=>{});
+      $('#shareAllMedia').onclick=async e=>{const list=mediaOf(p);if(!list.length&&p.image&&!ownMediaUrl(p.image)){showToast('请先把秦丝外链主图转存到自己的R2');return;}await prepareInlineFiles(list,p,{btn:e.currentTarget,title:p.name}).catch(()=>{});};
+      $('#export11').onclick=async e=>prepareInlineFiles(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,btn:e.currentTarget,title:`${p.name} 店铺1:1`}).catch(()=>{});
       $('#agentShareCenter').onclick=()=>openAgentShareManager(p,hub).catch(e=>showToast(e.message));
       $$('.copy-inline').forEach(btn=>btn.onclick=()=>copyText($('#'+btn.dataset.copy).value));
       const updateCounts=()=>{const n=charCount($('#xhsTitleCopy').value),spec=$('#xhsTitleSpec');$('#xhsTitleCount').textContent=n;if(spec)spec.classList.toggle('over',n>20);$('#storeTitleCount').textContent=charCount($('#storeTitleCopy').value);};$('#xhsTitleCopy').oninput=updateCounts;$('#storeTitleCopy').oninput=updateCounts;updateCounts();
@@ -423,4 +453,5 @@
   window.renderContentHub=renderContentHub;
   window.renderProductContent=renderProductContent;
   window.MocuiContent={dueProducts,scanRisk,defaultCopies,copiesFromMoments,analyzeXhsTags,applyXhsTagOptimization};
+// v3.5 卡片直接下载全部原图+视频；店铺1:1独立；取消下载选择弹窗
 })();

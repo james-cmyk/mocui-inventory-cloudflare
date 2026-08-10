@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.4-phase5';
+const CACHE='mocui-v3.5-phase6';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.4 朋友圈母稿生成平台文案、多图一次保存、店铺1:1全部图片
+// v3.5 工作台直接下载全部原图+视频，店铺1:1独立按钮，取消下载选择弹窗

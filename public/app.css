@@ -229,3 +229,15 @@ body{min-height:100dvh}
 
 /* v3.4 phase5: multi-file album handoff + moments-as-master copy */
 .prepared-save-wrap{min-height:245px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:18px 4px}.prepared-save-check{width:72px;height:72px;border-radius:50%;display:grid;place-items:center;background:#ecfdf3;color:#12b76a;font-size:34px;font-weight:900}.prepared-save-wrap>strong{font-size:18px;color:#111827}.prepared-save-wrap>span{font-size:13px;color:#667085}.prepared-save-wrap>.btn{margin-top:8px;min-height:48px}.prepared-save-wrap>small{font-size:10px;line-height:1.6;color:#98a2b3;max-width:290px}.title-spec-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:5px;color:#7a8699;font-size:9px}.title-spec-row b{font-size:10px;color:#344054}.title-spec-row b.over{color:#d92d20;background:#fff1f0;border-radius:999px;padding:3px 7px}
+
+/* v3.5 内容工作台：下载与店铺1:1直接放在商品卡片操作区，无二级下载弹窗 */
+.workbench-actions{align-items:center;gap:13px;flex-wrap:nowrap}
+.workbench-actions button{padding:6px 0;font-size:9.5px;white-space:nowrap;min-width:0}
+.workbench-actions button.inline-download-busy,.workbench-actions button.inline-download-ready{display:inline-flex;align-items:center;gap:4px}
+.inline-download-ring{--p:0;width:24px;height:24px;border-radius:50%;display:inline-grid;place-items:center;background:conic-gradient(#0a84ff calc(var(--p)*1%),#e6ebf1 0);position:relative;flex:0 0 24px}
+.inline-download-ring:before{content:"";position:absolute;inset:3px;border-radius:50%;background:#fff}
+.inline-download-ring i{position:relative;z-index:1;font-style:normal;font-size:7px;font-weight:800;color:#175cd3}
+.workbench-actions button.inline-download-ready{color:#15945a;font-weight:800}
+.inline-ready-dot{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;background:#eafbf2;color:#15945a;font-size:9px;font-weight:900}
+.content-media-tools.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:390px){.workbench-actions{gap:10px}.workbench-actions button{font-size:9px}.workbench-status,.workbench-actions{margin-left:81px}}
