@@ -263,7 +263,7 @@ function navRouteFor(route){
   if(route==='products' || route.startsWith('product')) return 'products';
   if(route==='loans' || route.startsWith('loan')) return 'loans';
   if(route==='reports') return 'reports';
-  if(route==='more' || ['content','customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import'].includes(route)) return 'more';
+  if(route==='more' || ['content','shortcut-setup','customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import'].includes(route)) return 'more';
   return route;
 }
 function setActiveNav(route){
@@ -375,7 +375,7 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
-    more:renderMore, content:renderContentHub, 'product-content':renderProductContent, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
+    more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
 }
@@ -952,7 +952,7 @@ async function runQinsilkImport(){
 
 async function renderMore(){
   setHeader('更多功能','客户、盘点、流水、备份');
-  const items=[['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
+  const items=[['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['shortcut-setup','⚡','iPhone快捷保存','一次设置，原图/视频/店铺图直接进相册'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
   $('#main').innerHTML=`<div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div><div class="notice warn" style="margin-top:12px">秦丝建议继续作为正式账本；漠翠系统用于玉石专业资料、借调和分析。导入前请先做完整备份。</div>`;
   $$('.more-item').forEach(el=>el.onclick=()=>navigate(el.dataset.route));
 }

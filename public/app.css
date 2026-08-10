@@ -241,3 +241,13 @@ body{min-height:100dvh}
 .inline-ready-dot{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;background:#eafbf2;color:#15945a;font-size:9px;font-weight:900}
 .content-media-tools.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media(max-width:390px){.workbench-actions{gap:10px}.workbench-actions button{font-size:9px}.workbench-status,.workbench-actions{margin-left:81px}}
+
+/* v3.6 iPhone 快捷指令桥 */
+.shortcut-setup-card{padding:18px}
+.shortcut-hero{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.shortcut-hero>span{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:#eef7f1;font-size:24px}
+.shortcut-hero>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.shortcut-hero strong{font-size:19px}
+.shortcut-hero small{color:var(--muted);line-height:1.45}
+.shortcut-steps{margin:8px 0 12px;padding-left:22px;color:var(--text);line-height:1.7}
+.shortcut-code{white-space:pre-wrap;word-break:break-word;background:#f7f8fa;border:1px solid var(--border);border-radius:14px;padding:14px;font:13px/1.65 -apple-system,BlinkMacSystemFont,"SFMono-Regular",Menlo,monospace;color:#28354a;max-height:360px;overflow:auto}

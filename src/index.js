@@ -1,6 +1,6 @@
 const encoder = new TextEncoder();
 
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.6.0";
 const SESSION_COOKIE = "mocui_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -96,6 +96,19 @@ async function ensureSchema(env) {
     )`),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_share_links_product ON share_links(product_id, created_at DESC)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_share_links_expires ON share_links(expires_at)"),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS shortcut_tasks (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      product_id TEXT,
+      action TEXT NOT NULL,
+      title TEXT NOT NULL,
+      copy_text TEXT,
+      media_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      fetch_count INTEGER NOT NULL DEFAULT 0
+    )`),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_shortcut_tasks_expires ON shortcut_tasks(expires_at)"),
   ]);
 }
 
@@ -670,6 +683,152 @@ async function mediaGet(request, env, filename) {
   return new Response(object.body, { headers });
 }
 
+function validShortcutToken(token) {
+  return /^[A-Za-z0-9_-]{32,120}$/.test(String(token || ""));
+}
+
+function shortcutTempFilenameFromUrl(value) {
+  try {
+    const url = new URL(String(value || ""), "https://mocui.local");
+    const match = /^\/api\/shortcut-temp\/([^/]+)$/.exec(url.pathname);
+    if (!match) return null;
+    const filename = decodeURIComponent(match[1]);
+    return /^t-[a-f0-9-]{36}\.(?:jpg|png|webp)$/.test(filename) ? filename : null;
+  } catch {
+    return null;
+  }
+}
+
+async function shortcutTempUpload(request, env) {
+  await requireSession(request, env);
+  const mime = String(request.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+  if (!/^(?:image\/(?:jpeg|png|webp))$/.test(mime)) return json({ error: "店铺图只支持 JPG、PNG 或 WebP" }, 415);
+  const length = Number(request.headers.get("content-length") || 0);
+  if (length && length > 25 * 1024 * 1024) return json({ error: "单张店铺图超过25MB" }, 413);
+  if (!request.body) return json({ error: "没有收到店铺图" }, 400);
+  const ext = uploadExtensionForMime(mime);
+  const filename = `t-${crypto.randomUUID()}.${ext}`;
+  const productId = String(request.headers.get("x-product-id") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+  await env.STORAGE.put(`shortcut-temp/${filename}`, request.body, {
+    httpMetadata: { contentType: mime },
+    customMetadata: { productId, createdAt: new Date().toISOString(), source: "shortcut-store11" },
+  });
+  return json({ ok: true, url: `/api/shortcut-temp/${filename}`, filename, mime, type: "image", size: length || 0 });
+}
+
+function normalizeShortcutMedia(input) {
+  if (!Array.isArray(input)) return [];
+  const result = [];
+  const seen = new Set();
+  for (const item of input.slice(0, 30)) {
+    const regular = mediaFilenameFromUrl(item?.url);
+    const temp = shortcutTempFilenameFromUrl(item?.url);
+    const filename = regular || temp;
+    if (!filename) continue;
+    const key = regular ? `media/${filename}` : `shortcut-temp/${filename}`;
+    if (seen.has(key)) continue;
+    const type = item?.type === "video" ? "video" : "image";
+    const mime = String(item?.mime || "").slice(0, 100);
+    const name = String(item?.name || filename).replace(/[\r\n]/g, " ").slice(0, 180);
+    seen.add(key);
+    result.push({ key, filename, type, mime, name, temp: Boolean(temp) });
+  }
+  return result;
+}
+
+async function createShortcutTask(request, env) {
+  await requireSession(request, env);
+  const body = await readJson(request);
+  const action = ["save", "store11", "moments"].includes(String(body.action || "")) ? String(body.action) : "save";
+  const media = normalizeShortcutMedia(body.media);
+  if (!media.length) return json({ error: "没有可交给快捷指令的素材" }, 400);
+  if (action === "moments" && media.some(item => item.type !== "image")) return json({ error: "朋友圈任务只允许原图" }, 400);
+  if (action === "store11" && media.some(item => !item.temp || item.type !== "image")) return json({ error: "店铺1:1任务必须使用临时生成图片" }, 400);
+  const token = randomToken(32);
+  const tokenHash = await sha256Text(token);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const expiresAt = now + 20 * 60 * 1000;
+  const productId = String(body.productId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 100);
+  const title = String(body.title || "漠翠商品素材").trim().slice(0, 200) || "漠翠商品素材";
+  const copyText = String(body.copyText || "").slice(0, 8000);
+  await env.DB.prepare(`INSERT INTO shortcut_tasks
+    (id, token_hash, product_id, action, title, copy_text, media_json, created_at, expires_at, fetch_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+    .bind(id, tokenHash, productId, action, title, copyText, JSON.stringify(media), now, expiresAt)
+    .run();
+  await audit(env, request, "shortcut_task_created", `${action};${productId};media=${media.length}`);
+  return json({ ok: true, id, token, url: `/api/shortcut-task/${encodeURIComponent(token)}`, expiresAt });
+}
+
+async function activeShortcutTask(env, token) {
+  if (!validShortcutToken(token)) return null;
+  const tokenHash = await sha256Text(token);
+  const row = await env.DB.prepare(`SELECT id, product_id, action, title, copy_text, media_json, created_at, expires_at, fetch_count
+    FROM shortcut_tasks WHERE token_hash = ?`).bind(tokenHash).first();
+  if (!row || Number(row.expires_at) < Date.now()) return null;
+  let media = [];
+  try { media = JSON.parse(row.media_json || "[]"); } catch { media = []; }
+  return { row, media: Array.isArray(media) ? media : [] };
+}
+
+async function shortcutTaskGet(request, env, token) {
+  const task = await activeShortcutTask(env, token);
+  if (!task) return json({ error: "快捷指令任务不存在或已过期" }, 404);
+  await env.DB.prepare("UPDATE shortcut_tasks SET fetch_count = fetch_count + 1 WHERE id = ?").bind(task.row.id).run();
+  const url = new URL(request.url);
+  const files = task.media.map((item, index) => ({
+    name: String(item.name || item.filename || `mocui-${index + 1}`).slice(0, 180),
+    type: item.type === "video" ? "video" : "image",
+    mime: String(item.mime || "").slice(0, 100),
+    url: `${url.origin}/api/shortcut-task/${encodeURIComponent(token)}/file/${index}`,
+  }));
+  const images = files.filter(item => item.type === "image").length;
+  const videos = files.filter(item => item.type === "video").length;
+  const summary = images && videos ? `${images}张图片 + ${videos}个视频` : images ? `${images}张图片` : `${videos}个视频`;
+  return json({
+    ok: true,
+    action: task.row.action,
+    title: task.row.title,
+    copyText: task.row.copy_text || "",
+    openWechat: task.row.action === "moments",
+    files,
+    message: task.row.action === "store11" ? `店铺1:1已保存：${summary}` : task.row.action === "moments" ? `朋友圈原图已保存：${summary}` : `商品素材已保存：${summary}`,
+    expiresAt: Number(task.row.expires_at),
+  });
+}
+
+async function shortcutTaskFile(request, env, token, indexText) {
+  const task = await activeShortcutTask(env, token);
+  if (!task) return json({ error: "快捷指令任务不存在或已过期" }, 404);
+  const index = Number(indexText);
+  if (!Number.isInteger(index) || index < 0 || index >= task.media.length) return json({ error: "素材序号无效" }, 404);
+  const item = task.media[index];
+  if (!item?.key || !/^(?:media|shortcut-temp)\//.test(item.key)) return json({ error: "素材地址无效" }, 404);
+  const object = await env.STORAGE.get(item.key);
+  if (!object) return json({ error: "素材文件不存在" }, 404);
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("cache-control", "private, no-store");
+  headers.set("x-content-type-options", "nosniff");
+  const safeName = String(item.name || item.filename || `mocui-${index + 1}`).replace(/["\\\r\n]/g, "_").slice(0, 160);
+  headers.set("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+  return new Response(object.body, { headers });
+}
+
+async function cleanupShortcutTasks(env) {
+  const now = Date.now();
+  const rows = await env.DB.prepare("SELECT id, media_json FROM shortcut_tasks WHERE expires_at < ? LIMIT 30").bind(now).all();
+  for (const row of rows.results || []) {
+    let media = [];
+    try { media = JSON.parse(row.media_json || "[]"); } catch { media = []; }
+    for (const item of Array.isArray(media) ? media : []) {
+      if (String(item?.key || "").startsWith("shortcut-temp/")) await env.STORAGE.delete(item.key).catch(() => undefined);
+    }
+  }
+  if ((rows.results || []).length) await env.DB.prepare("DELETE FROM shortcut_tasks WHERE expires_at < ?").bind(now).run();
+}
+
 
 function validShareToken(token) {
   return /^[A-Za-z0-9_-]{32,120}$/.test(String(token || ""));
@@ -864,6 +1023,12 @@ async function handleApi(request, env, ctx) {
   if (path === "/api/backups" && request.method === "GET") return listBackups(request, env);
   if (path === "/api/media/upload" && request.method === "POST") return mediaUpload(request, env);
   if (path === "/api/media/import" && request.method === "POST") return mediaImport(request, env);
+  if (path === "/api/shortcut-temp/upload" && request.method === "POST") return shortcutTempUpload(request, env);
+  if (path === "/api/shortcut/tasks" && request.method === "POST") return createShortcutTask(request, env);
+  const shortcutFileMatch = /^\/api\/shortcut-task\/([^/]+)\/file\/(\d+)$/.exec(path);
+  if (shortcutFileMatch && request.method === "GET") return shortcutTaskFile(request, env, decodeURIComponent(shortcutFileMatch[1]), shortcutFileMatch[2]);
+  const shortcutTaskMatch = /^\/api\/shortcut-task\/([^/]+)$/.exec(path);
+  if (shortcutTaskMatch && request.method === "GET") return shortcutTaskGet(request, env, decodeURIComponent(shortcutTaskMatch[1]));
   if (path === "/api/shares" && request.method === "POST") return createShareLink(request, env);
   if (path === "/api/shares" && request.method === "GET") return listShareLinks(request, env);
   const shareDeleteMatch = /^\/api\/shares\/([^/]+)$/.exec(path);
@@ -902,12 +1067,13 @@ export default {
       }));
       return withSecurityHeaders(json({ error: "服务器内部错误" }, 500));
     } finally {
-      ctx.waitUntil(
+      ctx.waitUntil(Promise.all([
         env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?")
           .bind(Date.now())
           .run()
           .catch(() => undefined),
-      );
+        cleanupShortcutTasks(env).catch(() => undefined),
+      ]));
     }
   },
 };

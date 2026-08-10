@@ -14,6 +14,8 @@
     {group:'站外引流',words:['加微信','加V','微信联系','手机号','电话联系','私下交易','扫码加我'],suggest:'删除站外联系方式与交易引导'},
   ];
   const ownMediaUrl=url=>/^\/api\/media\//.test(String(url||''));
+  const SHORTCUT_NAME='漠翠保存素材';
+  const isIOSDevice=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
   const cleanText=s=>String(s||'').trim();
   const charCount=s=>Array.from(String(s||'')).length;
   const cutChars=(s,n)=>Array.from(String(s||'')).slice(0,n).join('');
@@ -204,6 +206,58 @@
     const reader=res.body.getReader(),chunks=[];let loaded=0;while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);loaded+=value.byteLength;onProgress(total?Math.min(1,loaded/total):0);}
     const blob=new Blob(chunks,{type:res.headers.get('content-type')||typeHint||'application/octet-stream'});onProgress(1);return new File([blob],name,{type:blob.type});
   }
+  async function shortcutApi(path,options={}){
+    const res=await fetch(path,{credentials:'same-origin',...options});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw new Error(data.error||'快捷保存请求失败');
+    return data;
+  }
+  async function uploadShortcutTemp(file,p){
+    return shortcutApi('/api/shortcut-temp/upload',{method:'POST',headers:{'content-type':file.type||'image/jpeg','x-product-id':p.id||''},body:file});
+  }
+  function shortcutDeepLink(taskUrl){
+    return `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(taskUrl)}`;
+  }
+  function launchShortcutTask(taskUrl){
+    const link=shortcutDeepLink(taskUrl);
+    window.location.href=link;
+    return link;
+  }
+  async function createShortcutTask(p,{action='save',title=p.name,copyText='',media=[]}={}){
+    const result=await shortcutApi('/api/shortcut/tasks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:p.id||'',action,title,copyText,media})});
+    return new URL(result.url,location.origin).toString();
+  }
+  function shortcutMediaItem(m){return {url:m.url,type:m.type==='video'?'video':'image',name:m.name||'素材',mime:m.mime||''};}
+  async function saveViaShortcut(list,p,{store11=false,moments=false,btn=null,title=p.name,copyText=''}={}){
+    if(!list.length){showToast(store11?'暂无可生成的商品图片':'暂无可保存素材');return false;}
+    if(!isIOSDevice())return false;
+    const action=moments?'moments':store11?'store11':'save';
+    setInlineActionProgress(btn,3,store11?'生成1:1':'准备快捷保存');
+    try{
+      let media=[];
+      if(store11){
+        for(let i=0;i<list.length;i++){
+          const base=i/list.length;
+          setInlineActionProgress(btn,Math.max(4,Math.round(base*72)),`1:1 ${i+1}/${list.length}`);
+          const file=await fitFileFromMedia(list[i],1,`${p.code||'mocui'}-store-1x1-${String(i+1).padStart(2,'0')}`);
+          setInlineActionProgress(btn,Math.round((base+.55/list.length)*72),`上传 ${i+1}/${list.length}`);
+          const temp=await uploadShortcutTemp(file,p);
+          media.push({url:temp.url,type:'image',name:file.name,mime:temp.mime||file.type});
+        }
+      }else{
+        media=list.filter(m=>ownMediaUrl(m.url)).map(shortcutMediaItem);
+        if(!media.length)throw new Error('请先把素材上传/转存到自己的R2');
+        setInlineActionProgress(btn,55,'生成保存任务');
+      }
+      setInlineActionProgress(btn,86,'启动快捷指令');
+      const taskUrl=await createShortcutTask(p,{action,title,copyText,media});
+      setInlineActionProgress(btn,100,'已交给快捷指令');
+      setTimeout(()=>restoreInlineAction(btn,store11),1600);
+      launchShortcutTask(taskUrl);
+      showToast(store11?'已打开“漠翠保存素材”，完成后店铺1:1会直接进入相册':'已打开“漠翠保存素材”，图片/视频会直接进入相册');
+      return true;
+    }catch(err){restoreInlineAction(btn,store11);showToast(err.message);throw err;}
+  }
   function triggerBrowserDownload(file){const url=URL.createObjectURL(file),a=document.createElement('a');a.href=url;a.download=file.name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),5000);}
   let preparedInlineSave=null;
   function preparedKey(p,store11=false){return `${p.id||p.code||'product'}:${store11?'store11':'all'}`;}
@@ -328,6 +382,7 @@
     await recordShareTime(p,hub,platform);
     if(platform==='moments'){
       showToast('朋友圈文案已复制，时间已记录');
+      if(await saveViaShortcut(list,p,{moments:true,title:'朋友圈原图',copyText:text}).catch(()=>false))return;
       await prepareDownload(list,p,{title:'朋友圈原图'}).catch(()=>{});return;
     }
     showToast(`${cfg.label}文案已复制，分享时间已记录`);
@@ -411,7 +466,7 @@
       rows.sort((a,b)=>{const ad=todayIds.has(a.id)?1:0,bd=todayIds.has(b.id)?1:0;return bd-ad||latestActivityAt(b)-latestActivityAt(a);});
       const visible=rows.slice(0,limit),due=(filter==='all'&&!q)?visible.filter(p=>todayIds.has(p.id)):[],rest=visible.filter(p=>!due.includes(p));body.innerHTML=`${due.length?`<div class="workbench-group-title"><strong>今日推荐</strong><span>${due.length}件</span></div>${due.map(feedCard).join('')}`:''}${rest.length?`<div class="workbench-group-title"><strong>${q||filter!=='all'?'筛选结果':'最近商品'}</strong><span>${rest.length}件</span></div>${rest.map(feedCard).join('')}`:''}${!visible.length?emptyState('⌕','没有符合条件的商品'):''}${rows.length>limit?'<button id="workbenchLoadMore" class="btn secondary block">加载更多</button>':''}`;
       if($('#workbenchLoadMore'))$('#workbenchLoadMore').onclick=()=>{limit+=80;draw();};
-      $$('.workbench-product-card [data-action]').forEach(btn=>btn.onclick=async e=>{e.stopPropagation();const p=byId.get(btn.dataset.id);if(!p)return;const action=btn.dataset.action;if(action==='edit')navigate('product-content',{id:p.id});else if(action==='download')await prepareInlineFiles(mediaOf(p),p,{btn,title:p.name});else if(action==='store11')await prepareInlineFiles(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,btn,title:`${p.name} 店铺1:1`});else if(action==='copy')await openWorkbenchCopy(p);else if(action==='share')await openWorkbenchShare(p);});
+      $$('.workbench-product-card [data-action]').forEach(btn=>btn.onclick=async e=>{e.stopPropagation();const p=byId.get(btn.dataset.id);if(!p)return;const action=btn.dataset.action;if(action==='edit')navigate('product-content',{id:p.id});else if(action==='download'){const list=mediaOf(p);if(!(await saveViaShortcut(list,p,{btn,title:p.name}).catch(()=>false)))await prepareInlineFiles(list,p,{btn,title:p.name});}else if(action==='store11'){const list=mediaOf(p).filter(m=>m.type==='image');if(!(await saveViaShortcut(list,p,{store11:true,btn,title:`${p.name} 店铺1:1`}).catch(()=>false)))await prepareInlineFiles(list,p,{store11:true,btn,title:`${p.name} 店铺1:1`});}else if(action==='copy')await openWorkbenchCopy(p);else if(action==='share')await openWorkbenchShare(p);});
     };
     $$('.workbench-tabs button').forEach(btn=>btn.onclick=()=>{tab=btn.dataset.tab;$$('.workbench-tabs button').forEach(x=>x.classList.toggle('active',x===btn));draw();});
     $('#workbenchSearch').oninput=e=>{query=e.target.value;limit=80;draw();};
@@ -435,8 +490,8 @@
       if($('#importLegacyCover'))$('#importLegacyCover').onclick=async()=>{try{const result=await importQinsilkImage(p.image,p.id);p.media=[...mediaOf(p),{id:crypto.randomUUID(),type:'image',name:'秦丝主图',mime:result.mime,size:result.size||0,url:result.url,createdAt:new Date().toISOString()}];p.image=result.url;await dbPut('products',p);showToast('主图已转存到自己的R2');await renderPage();}catch(err){showToast(err.message);}};
       $$('.set-cover').forEach(btn=>btn.onclick=async()=>{const m=mediaOf(p).find(x=>x.id===btn.dataset.id);if(!m)return;p.image=m.url;p.updatedAt=new Date().toISOString();await dbPut('products',p);showToast('封面已更新');await renderPage();});
       $$('.remove-media').forEach(btn=>btn.onclick=async()=>{const m=mediaOf(p).find(x=>x.id===btn.dataset.id);if(!m)return;if(!await confirmDialog('从该商品移除这份素材？已上传到自有R2的文件也会删除。'))return;try{await deleteMediaUrl(m.url);}catch(_){/* 引用仍会移除 */}p.media=mediaOf(p).filter(x=>x.id!==m.id);if(p.image===m.url)p.image=p.media.find(x=>x.type==='image')?.url||'';await dbPut('products',p);await renderPage();});
-      $('#shareAllMedia').onclick=async e=>{const list=mediaOf(p);if(!list.length&&p.image&&!ownMediaUrl(p.image)){showToast('请先把秦丝外链主图转存到自己的R2');return;}await prepareInlineFiles(list,p,{btn:e.currentTarget,title:p.name}).catch(()=>{});};
-      $('#export11').onclick=async e=>prepareInlineFiles(mediaOf(p).filter(m=>m.type==='image'),p,{store11:true,btn:e.currentTarget,title:`${p.name} 店铺1:1`}).catch(()=>{});
+      $('#shareAllMedia').onclick=async e=>{const list=mediaOf(p);if(!list.length&&p.image&&!ownMediaUrl(p.image)){showToast('请先把秦丝外链主图转存到自己的R2');return;}if(!(await saveViaShortcut(list,p,{btn:e.currentTarget,title:p.name}).catch(()=>false)))await prepareInlineFiles(list,p,{btn:e.currentTarget,title:p.name}).catch(()=>{});};
+      $('#export11').onclick=async e=>{const list=mediaOf(p).filter(m=>m.type==='image');if(!(await saveViaShortcut(list,p,{store11:true,btn:e.currentTarget,title:`${p.name} 店铺1:1`}).catch(()=>false)))await prepareInlineFiles(list,p,{store11:true,btn:e.currentTarget,title:`${p.name} 店铺1:1`}).catch(()=>{});};
       $('#agentShareCenter').onclick=()=>openAgentShareManager(p,hub).catch(e=>showToast(e.message));
       $$('.copy-inline').forEach(btn=>btn.onclick=()=>copyText($('#'+btn.dataset.copy).value));
       const updateCounts=()=>{const n=charCount($('#xhsTitleCopy').value),spec=$('#xhsTitleSpec');$('#xhsTitleCount').textContent=n;if(spec)spec.classList.toggle('over',n>20);$('#storeTitleCount').textContent=charCount($('#storeTitleCopy').value);};$('#xhsTitleCopy').oninput=updateCounts;$('#storeTitleCopy').oninput=updateCounts;updateCounts();
@@ -449,9 +504,18 @@
     };
     await renderPage();
   }
+  async function renderShortcutSetup(){
+    setHeader('iPhone快捷保存','一次设置，后续直接存相册');
+    const steps=`1. 新建快捷指令，名称必须是：${SHORTCUT_NAME}\n2. 添加“获取URL内容”，URL使用“快捷指令输入”\n3. 添加“设定变量”，变量名：任务\n4. 从变量“任务”添加“获取字典值”，键：files\n5. 添加“重复每一项”\n6. 在重复中：从“重复项目”获取字典值，键：url\n7. 添加“获取URL内容”下载这个 url\n8. 添加“存储到照片相簿”\n9. 结束重复\n10. 从变量“任务”获取字典值 copyText；如果有值 → “拷贝至剪贴板”\n11. 从变量“任务”获取字典值 message → “显示通知”\n12. 从变量“任务”获取字典值 openWechat；如果为真 → “打开App”选择微信\n13. 结束“如果”`;
+    $('#main').innerHTML=`<div class="card shortcut-setup-card"><div class="shortcut-hero"><span>⚡</span><div><strong>${esc(SHORTCUT_NAME)}</strong><small>一个快捷指令同时处理：原图+视频、店铺1:1、朋友圈原图+文案。</small></div></div><div class="notice success"><strong>只需设置一次。</strong><br>以后内容工作台点击“下载”会直接运行快捷指令，把全部素材逐个保存进照片；朋友圈还会复制文案并打开微信。</div><div class="section-title">第一次设置</div><ol class="shortcut-steps"><li>打开“快捷指令”，新建一个快捷指令。</li><li>名称必须填写 <b>${esc(SHORTCUT_NAME)}</b>。</li><li>按照下面动作清单依次添加动作。</li></ol><pre class="shortcut-code">${esc(steps)}</pre><div class="btn-row"><button id="copyShortcutSteps" class="btn secondary">复制动作清单</button><button id="createShortcut" class="btn">打开快捷指令新建</button></div><button id="openShortcut" class="btn secondary block" style="margin-top:10px">测试打开「${esc(SHORTCUT_NAME)}」</button><div class="notice" style="margin-top:12px">第一次运行时，iPhone 可能询问是否允许快捷指令访问 erp.mocuiyu.com 和“照片”，请选择允许。快捷任务20分钟后自动失效。</div></div>`;
+    $('#copyShortcutSteps').onclick=()=>copyText(steps);
+    $('#createShortcut').onclick=()=>{location.href='shortcuts://create-shortcut';};
+    $('#openShortcut').onclick=()=>{location.href=`shortcuts://open-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}`;};
+  }
   function platformRow(p,hub,key,cfg){const last=lastPublished(hub,key),days=daysSince(last),repeat=Number(hub.repeatDays[key]||cfg.repeatDays);return `<div class="content-platform-row"><div class="content-platform-main"><strong>${cfg.label}</strong><span>${last?`最近分享：${fmtDateTime(last)} · ${days}天前`:'尚未记录分享时间'}</span><span>${last&&days<repeat?`建议 ${repeat-days} 天后再次曝光`:'现在可以发布/重新曝光'}</span></div><label class="repeat-field">周期<input class="repeat-days" data-platform="${key}" type="number" min="1" max="365" value="${repeat}">天</label><div class="content-platform-actions one"><button class="btn small publish-prepare" data-platform="${key}">复制文案 + 分享素材</button></div></div>`;}
   window.renderContentHub=renderContentHub;
   window.renderProductContent=renderProductContent;
+  window.renderShortcutSetup=renderShortcutSetup;
   window.MocuiContent={dueProducts,scanRisk,defaultCopies,copiesFromMoments,analyzeXhsTags,applyXhsTagOptimization};
-// v3.5 卡片直接下载全部原图+视频；店铺1:1独立；取消下载选择弹窗
+// v3.6 iPhone快捷指令桥：一键保存原图+视频、店铺1:1、朋友圈原图+文案
 })();
