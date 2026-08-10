@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.3-phase4';
+const CACHE='mocui-v3.4-phase5';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.3 微购式内容商品流、自动分享记录、小红书标签与店铺图适配
+// v3.4 朋友圈母稿生成平台文案、多图一次保存、店铺1:1全部图片
