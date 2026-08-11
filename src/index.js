@@ -791,7 +791,7 @@ async function shortcutTaskGet(request, env, token) {
     action: task.row.action,
     title: task.row.title,
     copyText: task.row.copy_text || "",
-    openWechat: task.row.action === "moments",
+    ...(task.row.action === "moments" ? { openWechat: true } : {}),
     files,
     message: task.row.action === "store11" ? `店铺1:1已保存：${summary}` : task.row.action === "moments" ? `朋友圈原图已保存：${summary}` : `商品素材已保存：${summary}`,
     expiresAt: Number(task.row.expires_at),

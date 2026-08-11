@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.6-shortcuts';
+const CACHE='mocui-v3.6.1-shortcuts-copyfix';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.6 iPhone快捷指令桥：保存原图+视频、店铺1:1、朋友圈原图+文案
+// v3.6.1 快捷指令剪贴板修复
