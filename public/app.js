@@ -371,6 +371,63 @@ function setupViewportBehavior(){
   update();
 }
 
+// iOS 26 的 standalone PWA 在切到快捷指令等外部 App 再回来后，
+// position:fixed; bottom:0 可能被 WebKit 绘制到页面中部。
+// 移动端改为 position:absolute，并根据当前页面滚动位置模拟固定到底部。
+function setupStableBottomDock(){
+  const nav=document.querySelector('.bottom-nav');
+  const app=document.querySelector('#app');
+  if(!nav||!app)return;
+  const media=window.matchMedia('(max-width:759px)');
+  let raf=0;
+
+  const sync=()=>{
+    raf=0;
+    if(!media.matches){
+      document.body.classList.remove('dock-js-fixed');
+      document.documentElement.style.removeProperty('--dock-top');
+      return;
+    }
+    const vv=window.visualViewport;
+    const pageTop=Math.max(
+      Number.isFinite(window.scrollY)?window.scrollY:0,
+      Number.isFinite(vv?.pageTop)?vv.pageTop:0
+    );
+    // standalone PWA 恢复时 visualViewport.height 偶尔会短暂保持旧值；
+    // 取可用高度中的最大值，键盘期间 Dock 本身会被 keyboard-open 隐藏。
+    const heights=[window.innerHeight,document.documentElement.clientHeight,vv?.height]
+      .filter(v=>Number.isFinite(v)&&v>0);
+    const viewportHeight=heights.length?Math.max(...heights):window.innerHeight;
+    const navHeight=nav.offsetHeight||70;
+    const appTop=app.offsetTop||0;
+    const top=Math.max(0,pageTop+viewportHeight-navHeight-appTop);
+    document.documentElement.style.setProperty('--dock-top',`${Math.round(top)}px`);
+    document.body.classList.add('dock-js-fixed');
+  };
+
+  const schedule=()=>{
+    if(raf)cancelAnimationFrame(raf);
+    raf=requestAnimationFrame(()=>requestAnimationFrame(sync));
+  };
+  const resyncAfterResume=()=>{
+    schedule();
+    setTimeout(schedule,80);
+    setTimeout(schedule,260);
+    setTimeout(schedule,700);
+  };
+
+  window.addEventListener('scroll',schedule,{passive:true});
+  window.addEventListener('resize',schedule,{passive:true});
+  window.addEventListener('orientationchange',resyncAfterResume,{passive:true});
+  window.addEventListener('focus',resyncAfterResume,{passive:true});
+  window.addEventListener('pageshow',resyncAfterResume,{passive:true});
+  window.visualViewport?.addEventListener('resize',schedule,{passive:true});
+  window.visualViewport?.addEventListener('scroll',schedule,{passive:true});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)resyncAfterResume();},{passive:true});
+  if(media.addEventListener)media.addEventListener('change',resyncAfterResume);
+  resyncAfterResume();
+}
+
 async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
@@ -1109,6 +1166,7 @@ async function init(){
   db=await openDB();
   await ensureDefaults();
   setupViewportBehavior();
+  setupStableBottomDock();
   history.scrollRestoration='manual';
   bindPrimaryNavigation();
   if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
