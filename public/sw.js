@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.6.2-ios-dock-fix';
+const CACHE='mocui-v3.6.3-qinsilk-sales-fix';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{

@@ -211,12 +211,34 @@
     };});
   }
   function normalizeSaleRows(rows){
-    return rows.map(row=>{const get=createAccessor(row);const qty=toNumber(get('销售数量','数量','出库数量'));let price=toNumber(get('销售单价','成交单价','折后单价','单价'));const amount=toNumber(get('销售金额','商品金额','折后金额','金额','实收金额'));if(!price&&qty)price=amount/Math.abs(qty);
-      const status=cleanText(get('状态','单据状态','业务类型','类型'));return {
-        rowNumber:row.__rowNumber,orderNo:cleanText(get('销售单号','订单号','单据编号','单号','流水号')),date:excelDateToISO(get('销售时间','开单时间','单据日期','日期','时间')),
-        customerName:cleanText(get('客户名称','客户','会员名称')),code:cleanText(get('商品货号','货号','商品编码','编码')),name:cleanText(get('商品名称','名称')),color:cleanText(get('颜色')),
-        qty,price,amount,costPrice:toNumber(get('成本价','销售成本单价','采购价')),discount:toNumber(get('优惠金额','折扣金额','优惠')),status,
-        returnLike:qty<0||/退货|退款|作废|撤销/.test(status),note:cleanText(get('备注','单据备注')),
+    return rows.map(row=>{
+      const get=createAccessor(row);
+      const qty=toNumber(get('单品数量','销售数量','数量','出库数量'));
+      const originalPrice=toNumber(get('单价','销售单价','成交单价'));
+      const discountPercent=toNumber(get('折扣(%)','折扣%','折扣率'));
+      let price=toNumber(get('折后价','折后单价','成交单价','销售单价','单价'));
+      const amount=toNumber(get('折后金额','销售金额','商品金额','金额'));
+      if(!price&&qty)price=amount/Math.abs(qty);
+      let costPrice=toNumber(get('采购均价','成本价','销售成本单价','采购价'));
+      const costAmount=toNumber(get('采购成本','销售成本'));
+      if(!costPrice&&qty&&costAmount)costPrice=costAmount/Math.abs(qty);
+      const profitAmount=toNumber(get('毛利润','毛利'));
+      const receivedRaw=get('实收金额');
+      const orderTotalRaw=get('单据总金额');
+      const received=receivedRaw===''||receivedRaw===null||receivedRaw===undefined?null:toNumber(receivedRaw);
+      const orderTotal=orderTotalRaw===''||orderTotalRaw===null||orderTotalRaw===undefined?null:toNumber(orderTotalRaw);
+      const status=cleanText(get('状态','单据状态','业务类别','业务类型','类型'));
+      const note=[cleanText(get('单据备注','备注')),cleanText(get('单据单品备注')),cleanText(get('商品备注'))].filter(Boolean).join('；');
+      return {
+        rowNumber:row.__rowNumber,
+        orderNo:cleanText(get('销售单号','订单号','单据编号','单号','流水号')),
+        date:excelDateToISO(get('销售时间','开单时间','单据日期','日期','时间')),
+        customerName:cleanText(get('客户名称','客户','会员名称')),
+        code:cleanText(get('商品货号','货号','商品编码','编码')),
+        name:cleanText(get('商品名称','名称')),
+        color:cleanText(get('颜色')),
+        qty,price,originalPrice,discountPercent,amount,costPrice,costAmount,profitAmount,received,orderTotal,status,
+        returnLike:qty<0||/退货|退款|作废|撤销/.test(status),note,
       };
     });
   }

@@ -444,10 +444,11 @@ async function renderDashboard(){
   const today=dateRange('today'), monthStart=new Date(new Date().getFullYear(),new Date().getMonth(),1);
   const todaySales=activeSales.filter(s=>inRange(s.createdAt,today));
   const monthSales=activeSales.filter(s=>new Date(s.createdAt)>=monthStart);
-  const inventoryQty=products.reduce((s,p)=>s+n(p.stock),0);
-  const inventoryCost=products.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
+  const catalogProducts=products.filter(p=>!p.historicalOnly);
+  const inventoryQty=catalogProducts.reduce((s,p)=>s+n(p.stock),0);
+  const inventoryCost=catalogProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   const sumAmount=rows=>rows.reduce((s,r)=>s+n(r.finalAmount),0);
-  const profit=rows=>rows.reduce((s,r)=>s+r.items.reduce((x,i)=>x+(n(i.price)-n(i.costPrice))*n(i.qty),0)-n(r.discountAmount),0);
+  const profit=rows=>rows.reduce((s,r)=>s+saleGrossProfit(r),0);
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
   $('#main').innerHTML=`
@@ -459,7 +460,7 @@ async function renderDashboard(){
     </div>
     <div class="section-title">商品仓库 <small>实时库存</small></div>
     <div class="grid-3">
-      <div class="metric compact"><div class="label">商品数量</div><div class="value">${products.length}</div></div>
+      <div class="metric compact"><div class="label">商品数量</div><div class="value">${catalogProducts.length}</div></div>
       <div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div>
       <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div>
     </div>
@@ -475,7 +476,8 @@ async function renderDashboard(){
 
 async function renderProducts(){
   setHeader('商品管理','查询、编辑、复制、批量上传',{label:'＋',onClick:()=>openProductForm()});
-  const [products,categories]=await Promise.all([dbAll('products'),dbAll('categories')]);
+  const [allProducts,categories]=await Promise.all([dbAll('products'),dbAll('categories')]);
+  const products=allProducts.filter(p=>!p.historicalOnly);
   const activeProducts=products.filter(p=>n(p.stock)>0), soldOutCount=products.length-activeProducts.length;
   const qty=activeProducts.reduce((s,p)=>s+n(p.stock),0), cost=activeProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   $('#main').innerHTML=`
@@ -887,23 +889,35 @@ async function openLoanReturnForm(loanId,productId=null,all=false,returnToDraft=
     }catch(err){showToast(err.message);}};
   }});
 }
+
+function saleItemGrossAmount(item){return n(item.qty)*n(item.price);}
+function saleItemNetAmount(sale,item){
+  if(item&&item.netAmount!==undefined&&item.netAmount!==null)return n(item.netAmount);
+  const gross=saleItemGrossAmount(item),subtotal=n(sale?.subtotal)||((sale?.items||[]).reduce((sum,i)=>sum+saleItemGrossAmount(i),0));
+  const finalAmount=n(sale?.finalAmount);
+  if(subtotal>0&&Number.isFinite(finalAmount))return gross*(finalAmount/subtotal);
+  return gross;
+}
+function saleCostTotal(sale){return (sale?.items||[]).reduce((sum,i)=>sum+n(i.costPrice)*n(i.qty),0);}
+function saleGrossProfit(sale){return (sale?.items||[]).reduce((sum,i)=>sum+saleItemNetAmount(sale,i)-n(i.costPrice)*n(i.qty),0);}
+
 async function renderReports(){
   setHeader('统计报表','经营概况、销售、利润、客户、商品');
   $('#main').innerHTML=`<div class="segment" id="reportRange"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
   const draw=async(key='30d',s='',e='')=>{
     const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>x.status==='active'&&inRange(x.createdAt,range));
     const revenue=rows.reduce((a,x)=>a+n(x.finalAmount),0), received=rows.reduce((a,x)=>a+n(x.received),0), qty=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+n(i.qty),0),0);
-    const grossProfit=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+(n(i.price)-n(i.costPrice))*n(i.qty),0)-n(x.discountAmount),0);
-    const discount=rows.reduce((a,x)=>a+n(x.discountAmount),0), cost=revenue-grossProfit;
+    const grossProfit=rows.reduce((a,x)=>a+saleGrossProfit(x),0);
+    const discount=rows.reduce((a,x)=>a+n(x.discountAmount),0), cost=rows.reduce((a,x)=>a+saleCostTotal(x),0);
     const customerMap={}; rows.forEach(x=>{const key=x.customerName||'散客';if(!customerMap[key])customerMap[key]={name:key,amount:0,qty:0,orders:0};customerMap[key].amount+=n(x.finalAmount);customerMap[key].qty+=x.items.reduce((a,i)=>a+n(i.qty),0);customerMap[key].orders++;});
-    const productMap={}; rows.forEach(x=>x.items.forEach(i=>{if(!productMap[i.productId])productMap[i.productId]={name:i.productName,color:i.color,qty:0,amount:0,profit:0};productMap[i.productId].qty+=n(i.qty);productMap[i.productId].amount+=n(i.price)*n(i.qty);productMap[i.productId].profit+=(n(i.price)-n(i.costPrice))*n(i.qty);}));
+    const productMap={}; rows.forEach(x=>x.items.forEach(i=>{if(!productMap[i.productId])productMap[i.productId]={name:i.productName,color:i.color,qty:0,amount:0,profit:0};const net=saleItemNetAmount(x,i),itemCost=n(i.costPrice)*n(i.qty);productMap[i.productId].qty+=n(i.qty);productMap[i.productId].amount+=net;productMap[i.productId].profit+=net-itemCost;}));
     const customerRank=Object.values(customerMap).sort((a,b)=>b.amount-a.amount); const productRank=Object.values(productMap).sort((a,b)=>b.amount-a.amount);
-    const inventoryCost=products.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0), inventoryQty=products.reduce((a,p)=>a+n(p.stock),0);
+    const catalogProducts=products.filter(p=>!p.historicalOnly),inventoryCost=catalogProducts.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0), inventoryQty=catalogProducts.reduce((a,p)=>a+n(p.stock),0);
     $('#reportBody').innerHTML=`
       <div class="section-title">经营概况</div><div class="grid-2"><div class="metric"><div class="label">销售额</div><div class="value">${fmtMoney(revenue)}</div><div class="hint">${rows.length} 笔订单</div></div><div class="metric"><div class="label">本次实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">应收差额 ${fmtMoney(revenue-received)}</div></div><div class="metric"><div class="label">销售数量</div><div class="value">${fmtInt(qty)}</div><div class="hint">商品件数</div></div><div class="metric"><div class="label">毛利润</div><div class="value">${fmtMoney(grossProfit)}</div><div class="hint">毛利率 ${revenue?((grossProfit/revenue)*100).toFixed(1):0}%</div></div></div>
       <div class="section-title">利润分析</div><div class="grid-3"><div class="metric compact"><div class="label">销售成本</div><div class="value">${fmtMoney(cost)}</div></div><div class="metric compact"><div class="label">优惠抹零</div><div class="value">${fmtMoney(discount)}</div></div><div class="metric compact"><div class="label">单均金额</div><div class="value">${fmtMoney(rows.length?revenue/rows.length:0)}</div></div></div>
-      <div class="section-title">库存汇总</div><div class="grid-3"><div class="metric compact"><div class="label">商品数量</div><div class="value">${products.length}</div></div><div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div></div>
-      <div class="section-title">客户分析 / 客户排名 <small>${customers.length} 位客户</small></div>${customerRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>排名</th><th>客户</th><th>订单</th><th>拿货数</th><th>交易额</th></tr></thead><tbody>${customerRank.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtInt(x.qty)}</td><td>${fmtMoney(x.amount)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('♙','暂无客户销售数据')}
+      <div class="section-title">库存汇总</div><div class="grid-3"><div class="metric compact"><div class="label">商品数量</div><div class="value">${catalogProducts.length}</div></div><div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div></div>
+      <div class="section-title">客户分析 / 客户排名 <small>客户总数 ${customers.length} · 本期成交 ${customerRank.filter(x=>x.name!=='散客').length}</small></div>${customerRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>排名</th><th>客户</th><th>订单</th><th>拿货数</th><th>交易额</th></tr></thead><tbody>${customerRank.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtInt(x.qty)}</td><td>${fmtMoney(x.amount)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('♙','暂无客户销售数据')}
       <div class="section-title">商品销售排名</div>${productRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>排名</th><th>商品</th><th>颜色</th><th>销量</th><th>交易额</th><th>毛利润</th></tr></thead><tbody>${productRank.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td>${esc(x.color||'')}</td><td>${fmtInt(x.qty)}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('◫','暂无商品销售数据')}
       <button id="exportSalesReport" class="btn secondary block" style="margin-top:12px">导出当前销售报表 CSV</button>`;
     $('#exportSalesReport').onclick=()=>exportSalesCSV(rows);
@@ -945,8 +959,9 @@ async function analyzeQinsilkFile(file){
     const codes=new Set(products.map(p=>normalizeMatchKey(p.code)).filter(Boolean)),names=new Set(products.map(p=>normalizeMatchKey(p.name)).filter(Boolean));
     for(const row of rows){if(!row.hasStock||(!row.code&&!row.name)){invalid++;continue;}(codes.has(normalizeMatchKey(row.code))||names.has(normalizeMatchKey(row.name)))?update++:warning++;}
   }else if(file.kind==='sales'){
-    const codes=new Set(products.map(p=>normalizeMatchKey(p.code)).filter(Boolean)),names=new Set(products.map(p=>normalizeMatchKey(p.name)).filter(Boolean));const sourceKeys=new Set(sales.map(s=>s.sourceKey||s.orderNo).filter(Boolean));const orders=new Set();
-    for(const row of rows){if(row.returnLike){skip++;continue;}if(row.qty<=0||(!row.code&&!row.name)){invalid++;continue;}if(!(codes.has(normalizeMatchKey(row.code))||names.has(normalizeMatchKey(row.name)))){warning++;continue;}const order=row.orderNo||`第${row.rowNumber}行`;orders.add(order);}
+    const codes=new Set(products.map(p=>normalizeMatchKey(p.code)).filter(Boolean)),names=new Set(products.map(p=>normalizeMatchKey(p.name)).filter(Boolean));const sourceKeys=new Set(sales.map(s=>s.sourceKey||s.orderNo).filter(Boolean));const orders=new Set(),missingProducts=new Set();
+    for(const row of rows){if(row.returnLike){skip++;continue;}if(row.qty<=0||(!row.code&&!row.name)){invalid++;continue;}if(!(codes.has(normalizeMatchKey(row.code))||names.has(normalizeMatchKey(row.name))))missingProducts.add(normalizeMatchKey(row.code)||`name:${normalizeMatchKey(row.name)}`);const order=row.orderNo||`第${row.rowNumber}行`;orders.add(order);}
+    warning+=missingProducts.size;
     for(const order of orders)sourceKeys.has(`qinsilk:${order}`)||sourceKeys.has(order)?skip++:create++;
   }else invalid=rows.length||1;
   return {create,update,skip,invalid,warning,repeated};
@@ -964,11 +979,11 @@ function updateQinsilkRunState(){const run=$('#runQinsilkImport');if(run)run.dis
 async function renderQinsilkImport(){
   setHeader('秦丝数据导入','Excel预览、去重与安全导入');
   const history=await getQinsilkHistory();
-  $('#main').innerHTML=`<div class="notice success"><strong>秦丝继续作为正式账本，本页面用于单向导入。</strong><br>商品按货号更新；客户按手机或姓名合并；库存按当前数量覆盖；销售作为历史记录导入，不重复扣减库存。</div>
+  $('#main').innerHTML=`<div class="notice success"><strong>秦丝继续作为正式账本，本页面用于单向导入。</strong><br>商品按货号更新；客户按手机或姓名合并；库存按当前数量覆盖；销售按单据编号合并为历史订单，不重复扣减库存；已售罄且当前商品库不存在的旧商品会自动建立隐藏历史档案。</div>
   <div class="card"><div class="card-title">1. 选择秦丝文件</div><label class="upload-box qinsilk-upload" for="qinsilkFiles">点击选择 Excel / CSV<br><small>支持多选：商品、客户、库存、销售</small></label><input id="qinsilkFiles" class="hidden" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" multiple><div id="qinsilkParseStatus" class="item-meta" style="margin-top:8px"></div></div>
   <div id="qinsilkFileList"></div>
   <div class="card"><div class="card-title">2. 备份后执行</div><div id="qinsilkBackupFlag" class="notice warn">导入前必须先下载完整备份</div><button id="backupBeforeQinsilk" class="btn secondary block">先导出完整 JSON 备份</button><button id="runQinsilkImport" class="btn block" style="margin-top:8px" disabled>开始安全导入</button><div id="qinsilkProgress" class="import-progress hidden"><div id="qinsilkProgressBar"></div></div><div id="qinsilkResult" style="margin-top:10px"></div></div>
-  <div class="card"><div class="card-title">导入规则</div><div class="rule-list"><div><strong>商品</strong><span>货号相同则更新资料；商品表没有实际库存时，库存保持不变或新商品设为0。</span></div><div><strong>库存</strong><span>按货号汇总所有仓库后设置为当前库存，并生成一条库存同步流水。</span></div><div><strong>销售</strong><span>只导入历史记录，不改变当前库存；秦丝退货/负数行先跳过并列入结果。</span></div><div><strong>图片</strong><span>先使用秦丝图片链接展示，后续可再迁移到自己的 R2。</span></div></div></div>
+  <div class="card"><div class="card-title">导入规则</div><div class="rule-list"><div><strong>商品</strong><span>货号相同则更新资料；商品表没有实际库存时，库存保持不变或新商品设为0。</span></div><div><strong>库存</strong><span>按货号汇总所有仓库后设置为当前库存，并生成一条库存同步流水。</span></div><div><strong>销售</strong><span>按单据编号合并；销售额取折后金额、成本取采购均价/采购成本、实收取单据实收；不改变当前库存。旧商品缺失时自动建立隐藏历史档案。秦丝退货/负数行跳过。</span></div><div><strong>图片</strong><span>先使用秦丝图片链接展示，后续可再迁移到自己的 R2。</span></div></div></div>
   <div class="section-title">最近导入 <small>${(history.batches||[]).length} 次</small></div><div class="list">${(history.batches||[]).slice(0,8).map(b=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(b.fileName||b.kind||'秦丝导入')}</div><div class="item-meta">${fmtDateTime(b.importedAt)} · ${esc(QinSilkImport.kindLabel(b.kind))} · ${fmtInt(b.rows||0)} 行</div></div><span class="badge success">完成</span></div>`).join('')||emptyState('◷','暂无导入记录')}</div>`;
   await drawQinsilkImportFiles();updateQinsilkRunState();
   $('#qinsilkFiles').onchange=async e=>{const files=[...e.target.files];if(!files.length)return;const status=$('#qinsilkParseStatus');for(let i=0;i<files.length;i++){status.textContent=`正在读取 ${i+1}/${files.length}：${files[i].name}`;try{const parsed=await QinSilkImport.readFile(files[i]);const kind=QinSilkImport.detectKind(parsed.headers,parsed.fileName),normalized=QinSilkImport.normalize(kind,parsed.rows);const entry={...parsed,kind,normalized};entry.analysis=await analyzeQinsilkFile(entry);appState.qinsilkFiles.push(entry);}catch(err){appState.qinsilkFiles.push({fileName:files[i].name,fileSize:files[i].size,hash:'',kind:'unknown',normalized:[],error:err.message,analysis:{invalid:1}});}await drawQinsilkImportFiles();}status.textContent=`已读取 ${files.length} 个文件`;e.target.value='';updateQinsilkRunState();};
@@ -993,13 +1008,40 @@ async function importQinsilkInventory(file,batch,result){
   for(const row of groups.values()){const product=(row.code&&byCode.get(normalizeMatchKey(row.code)))||byName.get(normalizeMatchKey(row.name));if(!product){result.warnings++;result.details.push(['库存','未匹配',row.code,row.name]);continue;}const before=n(product.stock),after=Math.max(0,n(row.stock)),delta=after-before;product.stock=after;if(row.costPrice)product.costPrice=row.costPrice;product.updatedAt=nowISO();product.qinsilk={...(product.qinsilk||{}),inventoryWarehouses:[...new Set(row.warehouses)],inventoryImportBatchId:batch};await dbPut('products',product,true);if(Math.abs(delta)>1e-8)await dbPut('stockMoves',{id:uid('move'),productId:product.id,productCode:product.code,productName:product.name,type:'qinsilk_inventory_sync',qtyChange:delta,beforeStock:before,afterStock:after,refType:'qinsilk_import',refId:batch,note:`秦丝当前库存同步${row.warehouses.length?`（${[...new Set(row.warehouses)].join('、')}）`:''}`,createdAt:nowISO()},true);result.updated++;result.details.push(['库存','设置',product.code,`${fmtInt(before)} → ${fmtInt(after)}`]);}
 }
 async function importQinsilkSales(file,batch,result){
-  const [products,customers,sales]=await Promise.all([dbAll('products'),dbAll('customers'),dbAll('sales')]);const byCode=new Map(products.map(p=>[normalizeMatchKey(p.code),p])),byName=new Map(products.map(p=>[normalizeMatchKey(p.name),p])),customerByName=new Map(customers.map(c=>[normalizeMatchKey(c.name),c]));const existing=new Set(sales.flatMap(s=>[s.sourceKey,s.orderNo]).filter(Boolean)),groups=new Map();
-  for(const row of file.normalized){if(row.returnLike){result.skipped++;result.details.push(['销售','跳过退货',row.orderNo,row.name]);continue;}if(row.qty<=0||(!row.code&&!row.name)){result.invalid++;continue;}const product=(row.code&&byCode.get(normalizeMatchKey(row.code)))||byName.get(normalizeMatchKey(row.name));if(!product){result.warnings++;result.details.push(['销售','商品未匹配',row.code,row.name]);continue;}const order=row.orderNo||`QS-${String(row.date||nowISO()).slice(0,10).replace(/-/g,'')}-${row.rowNumber}`,sourceKey=`qinsilk:${order}`;if(!groups.has(sourceKey))groups.set(sourceKey,{orderNo:order,sourceKey,date:row.date||nowISO(),customerName:row.customerName||'散客',note:row.note||'',items:[],amount:0,discount:0});const group=groups.get(sourceKey);group.items.push({productId:product.id,productCode:product.code,productName:product.name,color:row.color||product.color||'',qty:n(row.qty),price:n(row.price),costPrice:row.costPrice||n(product.costPrice),itemNote:'秦丝历史销售'});group.amount+=row.amount||n(row.qty)*n(row.price);group.discount+=n(row.discount);}
-  for(const group of groups.values()){if(existing.has(group.sourceKey)||existing.has(group.orderNo)){result.skipped++;continue;}let customerId='';if(group.customerName&&group.customerName!=='散客'){let c=customerByName.get(normalizeMatchKey(group.customerName));if(!c){c={id:uid('cust'),name:group.customerName,phone:'',note:'秦丝销售历史自动创建',createdAt:nowISO(),updatedAt:nowISO(),source:'qinsilk'};await dbPut('customers',c,true);customerByName.set(normalizeMatchKey(c.name),c);}customerId=c.id;}const subtotal=group.items.reduce((sum,i)=>sum+n(i.qty)*n(i.price),0),finalAmount=group.amount||Math.max(0,subtotal-group.discount),discountAmount=Math.max(0,group.discount||subtotal-finalAmount);const sale={id:uid('sale'),orderNo:group.orderNo,customerId,customerName:group.customerName,items:group.items,subtotal,discountType:'amount',discountValue:discountAmount,discountAmount,finalAmount,received:finalAmount,note:mergeImportedNote(group.note,['秦丝历史销售：不改变当前库存']),status:'active',createdAt:group.date,cancelledAt:null,updatedAt:nowISO(),source:'qinsilk',sourceType:'qinsilk_history',sourceKey:group.sourceKey,importedHistorical:true,stockApplied:false,importBatchId:batch};await dbPut('sales',sale,true);existing.add(group.sourceKey);result.created++;result.details.push(['销售','新增历史',sale.orderNo,`${sale.customerName} ${fmtMoney(sale.finalAmount)}`]);}
+  const [products,customers,sales]=await Promise.all([dbAll('products'),dbAll('customers'),dbAll('sales')]);
+  const byCode=new Map(products.map(p=>[normalizeMatchKey(p.code),p])),byName=new Map(products.map(p=>[normalizeMatchKey(p.name),p])),customerByName=new Map(customers.map(c=>[normalizeMatchKey(c.name),c]));
+  const existing=new Set(sales.flatMap(s=>[s.sourceKey,s.orderNo]).filter(Boolean)),groups=new Map(),createdHistoricalProducts=new Set();
+  for(const row of file.normalized){
+    if(row.returnLike){result.skipped++;result.details.push(['销售','跳过退货/作废',row.orderNo,row.name]);continue;}
+    if(row.qty<=0||(!row.code&&!row.name)){result.invalid++;result.details.push(['销售','无效行',row.orderNo||row.rowNumber,row.name||row.code||'缺少商品或数量']);continue;}
+    let product=(row.code&&byCode.get(normalizeMatchKey(row.code)))||byName.get(normalizeMatchKey(row.name));
+    if(!product){
+      const key=normalizeMatchKey(row.code)||`name:${normalizeMatchKey(row.name)}`;
+      product={id:uid('prod'),name:row.name||row.code||'秦丝历史商品',code:row.code||`HIS-${row.rowNumber}`,category:'',color:row.color||'',costPrice:n(row.costPrice),salePrice:n(row.originalPrice||row.price),stock:0,note:'秦丝历史销售自动建立；仅用于历史报表，不计入当前商品/库存数量',image:'',createdAt:row.date||nowISO(),updatedAt:nowISO(),source:'qinsilk',sourceKey:`qinsilk:historical-product:${row.code||row.name}`,historicalOnly:true,qinsilk:{historicalOnly:true,importBatchId:batch}};
+      await dbPut('products',product,true);if(row.code)byCode.set(normalizeMatchKey(row.code),product);byName.set(normalizeMatchKey(row.name),product);createdHistoricalProducts.add(key);result.created++;result.details.push(['商品','新增历史占位',product.code,product.name]);
+    }
+    const order=row.orderNo||`QS-${String(row.date||nowISO()).slice(0,10).replace(/-/g,'')}-${row.rowNumber}`,sourceKey=`qinsilk:${order}`;
+    if(!groups.has(sourceKey))groups.set(sourceKey,{orderNo:order,sourceKey,date:row.date||nowISO(),customerName:row.customerName||'散客',note:row.note||'',items:[],amount:0,received:null,orderTotal:null});
+    const group=groups.get(sourceKey);
+    if(!group.customerName||group.customerName==='散客')group.customerName=row.customerName||group.customerName||'散客';
+    if(!group.date&&row.date)group.date=row.date;if(row.note)group.note=mergeImportedNote(group.note,[row.note]);
+    const originalPrice=n(row.originalPrice||row.price),netAmount=n(row.amount),netUnitPrice=n(row.price)||(row.qty?netAmount/n(row.qty):0),costPrice=n(row.costPrice)||(row.qty&&row.costAmount?n(row.costAmount)/n(row.qty):n(product.costPrice));
+    group.items.push({productId:product.id,productCode:product.code,productName:product.name,color:row.color||product.color||'',qty:n(row.qty),price:originalPrice||netUnitPrice,costPrice,netUnitPrice,netAmount,originalPrice:originalPrice||netUnitPrice,discountPercent:n(row.discountPercent),qinsilkCostAmount:n(row.costAmount),qinsilkProfitAmount:n(row.profitAmount),itemNote:'秦丝历史销售'});
+    group.amount+=netAmount;if(group.received===null&&row.received!==null&&row.received!==undefined)group.received=n(row.received);if(group.orderTotal===null&&row.orderTotal!==null&&row.orderTotal!==undefined)group.orderTotal=n(row.orderTotal);
+  }
+  for(const group of groups.values()){
+    if(existing.has(group.sourceKey)||existing.has(group.orderNo)){result.skipped++;result.details.push(['销售','重复跳过',group.orderNo,'已存在秦丝历史销售']);continue;}
+    let customerId='';if(group.customerName&&group.customerName!=='散客'){let c=customerByName.get(normalizeMatchKey(group.customerName));if(!c){c={id:uid('cust'),name:group.customerName,phone:'',note:'秦丝销售历史自动创建',createdAt:nowISO(),updatedAt:nowISO(),source:'qinsilk'};await dbPut('customers',c,true);customerByName.set(normalizeMatchKey(c.name),c);result.created++;result.details.push(['客户','销售历史自动创建','',c.name]);}customerId=c.id;}
+    const subtotal=group.items.reduce((sum,i)=>sum+saleItemGrossAmount(i),0),lineAmount=group.amount;
+    const finalAmount=Math.abs(lineAmount)>1e-8?lineAmount:(group.orderTotal!==null?group.orderTotal:subtotal),discountAmount=Math.max(0,subtotal-finalAmount),received=group.received!==null?group.received:finalAmount;
+    if(group.orderTotal!==null&&Math.abs(finalAmount-group.orderTotal)>0.02){result.warnings++;result.details.push(['销售','金额校验提醒',group.orderNo,`明细折后金额 ${fmtMoney(finalAmount)} / 单据总金额 ${fmtMoney(group.orderTotal)}`]);}
+    const sale={id:uid('sale'),orderNo:group.orderNo,customerId,customerName:group.customerName,items:group.items,subtotal,discountType:discountAmount>0?'amount':'none',discountValue:discountAmount,discountAmount,finalAmount,received,note:mergeImportedNote(group.note,['秦丝历史销售：按单据编号合并；折后金额计入销售额；不改变当前库存']),status:'active',createdAt:group.date,cancelledAt:null,updatedAt:nowISO(),source:'qinsilk',sourceType:'qinsilk_history',sourceKey:group.sourceKey,importedHistorical:true,stockApplied:false,importBatchId:batch,qinsilk:{orderTotal:group.orderTotal,received:group.received}};
+    await dbPut('sales',sale,true);existing.add(group.sourceKey);result.created++;result.details.push(['销售','新增历史',sale.orderNo,`${sale.customerName} ${fmtMoney(sale.finalAmount)}`]);
+  }
 }
 function showQinsilkResult(result){const box=$('#qinsilkResult');if(!box)return;box.innerHTML=`<div class="notice success"><strong>导入完成</strong><br>新增 ${result.created} · 更新 ${result.updated} · 跳过 ${result.skipped} · 警告 ${result.warnings} · 无效 ${result.invalid}</div><button id="downloadQinsilkLog" class="btn secondary block">下载导入结果 CSV</button>`;$('#downloadQinsilkLog').onclick=()=>{const head=['类型','结果','编号','说明'];downloadBlob('\ufeff'+[head,...result.details].map(r=>r.map(csvCell).join(',')).join('\n'),`秦丝导入结果_${new Date().toISOString().slice(0,10)}.csv`,'text/csv;charset=utf-8');};}
 async function runQinsilkImport(){
-  if(!appState.qinsilkBackupDone){showToast('请先导出完整备份');return;}const files=appState.qinsilkFiles.filter(f=>f.kind!=='unknown'&&f.normalized.length);if(!files.length){showToast('没有可导入文件');return;}if(!await confirmDialog('确认开始导入？商品会按货号更新，库存文件会设置当前库存，销售历史不会扣库存。'))return;
+  if(!appState.qinsilkBackupDone){showToast('请先导出完整备份');return;}const files=appState.qinsilkFiles.filter(f=>f.kind!=='unknown'&&f.normalized.length);if(!files.length){showToast('没有可导入文件');return;}if(!await confirmDialog('确认开始导入？销售明细会按单据编号合并，历史销售不会扣减当前库存；旧商品缺失时会自动建立隐藏历史档案。'))return;
   await waitForInitialCloudPull();const before=await snapshotAllStores(),batch=uid('qinsilk'),result={created:0,updated:0,skipped:0,warnings:0,invalid:0,details:[],batchId:batch,startedAt:nowISO()};const button=$('#runQinsilkImport'),progress=$('#qinsilkProgress'),bar=$('#qinsilkProgressBar');button.disabled=true;button.textContent='正在导入…';progress.classList.remove('hidden');
   window.__cloudImporting=true;
   try{for(let i=0;i<files.length;i++){bar.style.width=`${Math.round(i/files.length*100)}%`;const file=files[i];if(file.kind==='products')await importQinsilkProducts(file,batch,result);else if(file.kind==='customers')await importQinsilkCustomers(file,batch,result);else if(file.kind==='inventory')await importQinsilkInventory(file,batch,result);else if(file.kind==='sales')await importQinsilkSales(file,batch,result);const history=await getQinsilkHistory();history.batches=[{batchId:batch,fileName:file.fileName,kind:file.kind,hash:file.hash,rows:file.normalized.length,importedAt:nowISO()},...(history.batches||[])].slice(0,50);history.updatedAt=nowISO();await dbPut('settings',history,true);}bar.style.width='100%';}
