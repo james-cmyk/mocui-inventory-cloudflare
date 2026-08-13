@@ -487,6 +487,15 @@ function setupViewportBehavior(){
     const keyboardOpen=isEditableFocused()&&viewportShrink>120;
     document.body.classList.toggle('keyboard-open',keyboardOpen);
     document.documentElement.style.setProperty('--visual-viewport-height',`${viewport.height}px`);
+
+    // v3.8.1：Dock 保持正常 flex 文档流，只校准整个 App 壳层高度。
+    // standalone PWA 从快捷指令/系统界面返回时，100dvh 偶尔会比真实可用高度少一截，
+    // 于是 Dock 看起来“抬高”。非键盘状态取多个视口高度中的最大有效值；
+    // 键盘打开时则使用 visualViewport.height，避免输入框被键盘遮住。
+    const heights=[window.innerHeight,document.documentElement.clientHeight,viewport.height]
+      .filter(v=>Number.isFinite(v)&&v>0);
+    const shellHeight=keyboardOpen?viewport.height:(heights.length?Math.max(...heights):window.innerHeight);
+    document.documentElement.style.setProperty('--app-viewport-height',`${Math.round(shellHeight)}px`);
   };
   viewport.addEventListener('resize',update,{passive:true});
   viewport.addEventListener('scroll',update,{passive:true});

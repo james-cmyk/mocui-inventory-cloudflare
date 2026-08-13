@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.8-category-tree';
+const CACHE='mocui-v3.8.1-dock-viewport-fix';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.8 分类树：自动把秦丝扁平分类整理为“玉种/系列 → 子分类”，并同步经营助手按一级分类分析
+// v3.8.1：保留分类树，并修复 iOS standalone PWA Dock 因 100dvh 高度漂移而抬高

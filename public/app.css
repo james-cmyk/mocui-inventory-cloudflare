@@ -270,16 +270,19 @@ body{min-height:100dvh}
    不再依赖 position:fixed / absolute / visualViewport 顶部计算。 */
 @media(max-width:759px){
   html,body{
+    width:100%;
     height:100%;
-    height:100dvh;
     min-height:0!important;
     overflow:hidden!important;
   }
   body{
-    padding-bottom:0!important;
+    padding:0!important;
+    margin:0!important;
   }
   #app{
-    height:100%;
+    /* iOS standalone PWA 的 100dvh 在恢复/状态栏变化后可能短暂变小，
+       导致正常文档流中的 Dock 被整体抬高。高度改由 JS 用真实可用视口像素同步。 */
+    height:var(--app-viewport-height,100vh);
     min-height:0!important;
     display:flex;
     flex-direction:column;
