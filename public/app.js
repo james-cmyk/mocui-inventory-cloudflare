@@ -96,11 +96,125 @@ async function dbAdd(store,value,silent=false){ await waitForInitialCloudPull(si
 async function dbDelete(store,id,silent=false){ await waitForInitialCloudPull(silent);const r=await reqP(db.transaction(store,'readwrite').objectStore(store).delete(id)); if(!silent&&!window.__cloudImporting)window.CloudSync?.schedule(); return r; }
 async function dbClear(store,silent=false){ await waitForInitialCloudPull(silent);const r=await reqP(db.transaction(store,'readwrite').objectStore(store).clear()); if(!silent&&!window.__cloudImporting)window.CloudSync?.schedule(); return r; }
 
+const CATEGORY_TREE_VERSION=1;
+const CATEGORY_ROOT_SPECS=[
+  {name:'金镶玉',prefixes:['金镶玉'],prefix:'金镶玉'},
+  {name:'银镶玉',prefixes:['银镶玉'],prefix:'银镶玉'},
+  {name:'碧玉',prefixes:['碧玉'],prefix:'碧玉'},
+  {name:'糖玉',prefixes:['糖玉'],prefix:'糖玉'},
+  {name:'青花',prefixes:['青花'],prefix:'青花'},
+  {name:'烟紫 / 紫罗兰',prefixes:['烟紫紫罗兰','烟紫'],prefix:'烟紫'},
+  {name:'藕粉',prefixes:['藕粉'],prefix:'藕粉'},
+  {name:'白玉',prefixes:['白玉'],prefix:'白玉'},
+  {name:'多宝系列',prefixes:['多宝系列','多宝'],prefix:'多宝'},
+  {name:'黄玉',prefixes:['黄玉'],prefix:'黄玉'},
+  {name:'糖白',prefixes:['糖白'],prefix:'糖白'},
+  {name:'南红',prefixes:['南红'],prefix:'南红'},
+  {name:'晴水',prefixes:['晴水'],prefix:'晴水'},
+  {name:'且末蓝',prefixes:['且末蓝'],prefix:'且末蓝'},
+  {name:'鸭蛋青 / 豆青',prefixes:['鸭蛋青豆青','鸭蛋青'],prefix:'鸭蛋青豆青'},
+  {name:'裸石面',prefixes:['裸石面'],prefix:'裸石面'},
+  {name:'器皿',prefixes:['器皿'],prefix:'器皿'},
+  {name:'挂件',prefixes:['挂件'],prefix:'挂件'},
+  {name:'其他',prefixes:['其他'],prefix:'其他'},
+];
+const CATEGORY_INVALID_VALUES=new Set(['','30','无','未分类','null','undefined']);
+const CATEGORY_LEGACY_SEEDS=new Set(['手镯','手串','吊坠','戒指','摆件','原石']);
+function cleanCategoryValue(value){return String(value??'').replace(/\s+/g,'').trim();}
+function categoryLegacySuffix(name){const x=String(name||'').trim();return ({'戒指/指环':'戒指指环','单圈手串':'单圈手串','多圈手串':'多圈手串'}[x]||x.replace(/[\/／]/g,''));}
+function normalizeCategoryChild(value){
+  const x=String(value||'').replace(/^[\s·\/／_-]+|[\s·\/／_-]+$/g,'').trim();
+  if(!x)return '';
+  if(x==='单圈')return '单圈手串';
+  if(x==='多圈')return '多圈手串';
+  if(x==='戒指'||x==='指环'||x==='戒指指环')return '戒指/指环';
+  return x;
+}
+function inferCategoryParts(value){
+  const raw=cleanCategoryValue(value);
+  if(CATEGORY_INVALID_VALUES.has(raw.toLowerCase()))return {raw:'',rootName:'',rootPrefix:'',childName:''};
+  const candidates=[];
+  CATEGORY_ROOT_SPECS.forEach((spec,index)=>(spec.prefixes||[]).forEach(alias=>candidates.push({spec,alias,index})));
+  candidates.sort((a,b)=>b.alias.length-a.alias.length||a.index-b.index);
+  for(const {spec,alias} of candidates){
+    if(raw===alias||raw.startsWith(alias)){
+      const rest=raw===alias?'':raw.slice(alias.length);
+      const childName=normalizeCategoryChild(rest);
+      return {raw,rootName:spec.name,rootPrefix:spec.prefix||alias,childName};
+    }
+  }
+  const suffixes=['单圈手串','多圈手串','戒指指环','手镯','项链','挂件','耳坠','手串','单圈','多圈','戒指'];
+  for(const suffix of suffixes){
+    if(raw!==suffix&&raw.endsWith(suffix)){
+      const rootName=raw.slice(0,-suffix.length)||raw;
+      return {raw,rootName,rootPrefix:rootName,childName:normalizeCategoryChild(suffix)};
+    }
+  }
+  return {raw,rootName:raw,rootPrefix:raw,childName:''};
+}
+function categorySortValue(c){return Number.isFinite(Number(c?.sort))?Number(c.sort):9999;}
+function sortCategories(rows){return [...(rows||[])].sort((a,b)=>categorySortValue(a)-categorySortValue(b)||String(a.name||'').localeCompare(String(b.name||''),'zh-CN'));}
+function categoryTreeData(categories){
+  const rows=categories||[],roots=sortCategories(rows.filter(c=>!c.parentId)),children=new Map();
+  roots.forEach(r=>children.set(r.id,sortCategories(rows.filter(c=>c.parentId===r.id))));
+  return {roots,children,byId:new Map(rows.map(c=>[c.id,c]))};
+}
+function categoryFlatValue(c,categories=[]){
+  if(!c)return '';
+  if(c.fullName)return c.fullName;
+  if(!c.parentId)return c.name||'';
+  const parent=(categories||[]).find(x=>x.id===c.parentId);return `${parent?.prefix||parent?.fullName||parent?.name||''}${categoryLegacySuffix(c.name)}`;
+}
+function categoryPathLabel(value,categories=[]){
+  const raw=cleanCategoryValue(value);if(!raw)return '未分类';
+  const node=(categories||[]).find(c=>cleanCategoryValue(categoryFlatValue(c,categories))===raw||cleanCategoryValue(c.fullName)===raw||(c.aliases||[]).some(a=>cleanCategoryValue(a)===raw));
+  if(node){if(!node.parentId)return node.name;const parent=(categories||[]).find(c=>c.id===node.parentId);return parent?`${parent.name} / ${node.name}`:node.name;}
+  const parts=inferCategoryParts(raw);return parts.childName?`${parts.rootName} / ${parts.childName}`:(parts.rootName||raw);
+}
+function categoryRootLabel(value){const p=inferCategoryParts(value);return p.rootName||'未分类';}
+function categoryChildLabel(value){const p=inferCategoryParts(value);return p.childName||'未细分';}
+function categoryNodeMatchesProduct(node,product,categories=[]){
+  if(!node)return true;
+  if(node.id==='__uncategorized__')return !cleanCategoryValue(product.category);
+  if(product.categoryId&&product.categoryId===node.id)return true;
+  const flat=cleanCategoryValue(product.category),nodeValue=cleanCategoryValue(categoryFlatValue(node,categories)),aliases=new Set([nodeValue,...(node.aliases||[]).map(cleanCategoryValue)]);
+  if(node.parentId)return aliases.has(flat);
+  if(flat===nodeValue)return true;
+  const childIds=new Set((categories||[]).filter(c=>c.parentId===node.id).map(c=>c.id));
+  if(product.categoryId&&childIds.has(product.categoryId))return true;
+  const childValues=new Set((categories||[]).filter(c=>c.parentId===node.id).flatMap(c=>[categoryFlatValue(c,categories),...(c.aliases||[])]).map(cleanCategoryValue));
+  return childValues.has(flat)||categoryRootLabel(flat)===node.name;
+}
+function rootSpecOrder(name){const i=CATEGORY_ROOT_SPECS.findIndex(x=>x.name===name);return i>=0?i:900;}
+function makeRootCategory(name,prefix='',sort=null){return {id:uid('cat'),name:String(name||'').trim(),parentId:'',prefix:prefix||String(name||'').replace(/\s*\/\s*|系列/g,''),fullName:String(name||'').includes('/')?(prefix||String(name||'').trim()):String(name||'').trim(),sort:sort??rootSpecOrder(name),treeVersion:CATEGORY_TREE_VERSION,createdAt:nowISO(),updatedAt:nowISO()};}
+function makeChildCategory(root,name,fullName='',sort=999){const flat=fullName||`${root.prefix||root.fullName||root.name}${categoryLegacySuffix(name)}`;return {id:uid('cat'),name:String(name||'').trim(),parentId:root.id,prefix:'',fullName:flat,aliases:[flat],sort,treeVersion:CATEGORY_TREE_VERSION,createdAt:nowISO(),updatedAt:nowISO()};}
+async function ensureCategoryTreeValue(value,cachedCategories=null){
+  const parts=inferCategoryParts(value);if(!parts.raw)return {value:'',categoryId:'',categories:cachedCategories||await dbAll('categories')};
+  const categories=cachedCategories||await dbAll('categories');let root=categories.find(c=>!c.parentId&&c.name===parts.rootName);
+  if(!root){root=makeRootCategory(parts.rootName,parts.rootPrefix);await dbPut('categories',root,true);categories.push(root);}
+  if(!parts.childName)return {value:parts.raw,categoryId:root.id,categories};
+  let child=categories.find(c=>c.parentId===root.id&&(c.name===parts.childName||cleanCategoryValue(categoryFlatValue(c,categories))===parts.raw||(c.aliases||[]).some(a=>cleanCategoryValue(a)===parts.raw)));
+  if(!child){child=makeChildCategory(root,parts.childName,parts.raw,(categories.filter(c=>c.parentId===root.id).length+1)*10);await dbPut('categories',child,true);categories.push(child);}else if(!(child.aliases||[]).some(a=>cleanCategoryValue(a)===parts.raw)&&cleanCategoryValue(child.fullName)!==parts.raw){child.aliases=[...(child.aliases||[]),parts.raw];child.updatedAt=nowISO();await dbPut('categories',child,true);}
+  return {value:parts.raw,categoryId:child.id,categories};
+}
+async function migrateCategoryTreeV1(){
+  const marker=await dbGet('settings','categoryTreeV1');
+  const current=await dbAll('categories');
+  if(current.length&&current.every(c=>c.treeVersion===CATEGORY_TREE_VERSION)){if(marker?.version!==CATEGORY_TREE_VERSION)await dbPut('settings',{id:'categoryTreeV1',version:CATEGORY_TREE_VERSION,migratedAt:nowISO(),productLinksUpdated:0},true);return false;}
+  if(marker?.version===CATEGORY_TREE_VERSION&&current.some(c=>c.treeVersion===CATEGORY_TREE_VERSION))return false;
+  const products=await dbAll('products'),sourceValues=new Set(),productValues=new Set(products.map(p=>cleanCategoryValue(p.category)).filter(Boolean));
+  current.forEach(c=>{const v=cleanCategoryValue(c.fullName||c.name);if(v&&(!CATEGORY_LEGACY_SEEDS.has(v)||productValues.has(v)))sourceValues.add(v);});productValues.forEach(v=>sourceValues.add(v));
+  const roots=[],children=[],rootMap=new Map(),fullMap=new Map(),semanticChildMap=new Map();
+  const ensureRoot=parts=>{let r=rootMap.get(parts.rootName);if(r)return r;r=makeRootCategory(parts.rootName,parts.rootPrefix,rootSpecOrder(parts.rootName));rootMap.set(parts.rootName,r);roots.push(r);fullMap.set(cleanCategoryValue(r.fullName),r);return r;};
+  [...sourceValues].forEach(value=>{const parts=inferCategoryParts(value);if(!parts.raw)return;const root=ensureRoot(parts);if(parts.childName){const key=cleanCategoryValue(parts.raw),semantic=`${root.id}::${parts.childName}`;let child=semanticChildMap.get(semantic);if(!child){child=makeChildCategory(root,parts.childName,parts.raw,(children.filter(c=>c.parentId===root.id).length+1)*10);children.push(child);semanticChildMap.set(semantic,child);}else if(!(child.aliases||[]).some(a=>cleanCategoryValue(a)===key)){child.aliases=[...(child.aliases||[]),parts.raw];}fullMap.set(key,child);}else fullMap.set(cleanCategoryValue(parts.raw),root);});
+  CATEGORY_ROOT_SPECS.forEach(spec=>ensureRoot({rootName:spec.name,rootPrefix:spec.prefix}));
+  await dbClear('categories',true);for(const row of [...sortCategories(roots),...sortCategories(children)])await dbPut('categories',row,true);
+  let changed=0;for(const product of products){const raw=cleanCategoryValue(product.category);if(CATEGORY_INVALID_VALUES.has(raw.toLowerCase())){if(product.category||product.categoryId){product.category='';product.categoryId='';product.updatedAt=nowISO();await dbPut('products',product,true);changed++;}continue;}const node=fullMap.get(raw);if(node&&product.categoryId!==node.id){product.categoryId=node.id;product.updatedAt=nowISO();await dbPut('products',product,true);changed++;}}
+  await dbPut('settings',{id:'categoryTreeV1',version:CATEGORY_TREE_VERSION,migratedAt:nowISO(),productLinksUpdated:changed},true);window.CloudSync?.schedule();return true;
+}
 async function ensureDefaults(){
   const categories=await dbAll('categories');
-  if(!categories.length){
-    for(const name of ['手镯','手串','吊坠','戒指','摆件','原石','其他']) await dbPut('categories',{id:uid('cat'),name,createdAt:nowISO()});
-  }
+  if(!categories.length){for(const [i,spec] of CATEGORY_ROOT_SPECS.entries())await dbPut('categories',makeRootCategory(spec.name,spec.prefix,i),true);}
 }
 async function nextProductCode(){
   const products=await dbAll('products');
@@ -345,8 +459,8 @@ function emptyState(icon,title,text=''){
   return `<div class="empty"><div class="emoji">${icon}</div><strong>${esc(title)}</strong>${text?`<div class="item-meta">${esc(text)}</div>`:''}</div>`;
 }
 function imageThumb(p){ return p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:`<div class="thumb placeholder">玉</div>`; }
-function productListItem(p){
-  return `<div class="list-item clickable" data-product-id="${p.id}">${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">${esc(p.code)} · ${esc(p.category||'未分类')} · ${esc(p.color||'未填写颜色')}</div><div class="item-meta">成本 ${fmtMoney(p.costPrice)}　售价 ${fmtMoney(p.salePrice)}</div></div><div class="item-right"><span class="badge ${n(p.stock)<=0?'danger':n(p.stock)<=1?'warn':'success'}">库存 ${fmtInt(p.stock)}</span></div></div>`;
+function productListItem(p,categories=[]){
+  return `<div class="list-item clickable" data-product-id="${p.id}">${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">${esc(p.code)} · ${esc(categoryPathLabel(p.category,categories))} · ${esc(p.color||'未填写颜色')}</div><div class="item-meta">成本 ${fmtMoney(p.costPrice)}　售价 ${fmtMoney(p.salePrice)}</div></div><div class="item-right"><span class="badge ${n(p.stock)<=0?'danger':n(p.stock)<=1?'warn':'success'}">库存 ${fmtInt(p.stock)}</span></div></div>`;
 }
 
 function enhanceCurrentPage(){
@@ -484,30 +598,39 @@ async function renderDashboard(){
   $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickContent').onclick=()=>navigate('content');
 }
 
+function categoryPickerRowsHTML(categories,selectedId='',expandedRoots=new Set(),query='',allowAll=true){
+  const {roots,children}=categoryTreeData(categories),q=String(query||'').trim().toLowerCase();let html='';
+  if(!q){if(allowAll)html+=`<button class="category-picker-row category-special ${selectedId==='__all__'?'selected':''}" data-category-id="__all__"><span></span><strong>全部分类</strong><b>✓</b></button>`;html+=`<button class="category-picker-row category-special ${selectedId==='__uncategorized__'?'selected':''}" data-category-id="__uncategorized__"><span></span><strong>未分类</strong><b>✓</b></button>`;}
+  for(const root of roots){const kids=children.get(root.id)||[],rootMatches=!q||String(root.name).toLowerCase().includes(q)||kids.some(c=>String(c.name).toLowerCase().includes(q)||String(categoryFlatValue(c,categories)).toLowerCase().includes(q));if(!rootMatches)continue;const open=q||expandedRoots.has(root.id);html+=`<div class="category-tree-group"><div class="category-picker-row ${selectedId===root.id?'selected':''}"><button class="category-expand ${kids.length?'':'empty'}" data-expand-id="${root.id}" type="button">${kids.length?(open?'▾':'▸'):''}</button><button class="category-pick-main" data-category-id="${root.id}" type="button"><strong>${esc(root.name)}</strong><small>${kids.length?`${kids.length} 个子分类`:'一级分类'}</small></button><b>✓</b></div>${open?kids.filter(c=>!q||String(c.name).toLowerCase().includes(q)||String(root.name).toLowerCase().includes(q)||String(categoryFlatValue(c,categories)).toLowerCase().includes(q)).map(c=>`<button class="category-picker-row category-child ${selectedId===c.id?'selected':''}" data-category-id="${c.id}" type="button"><span></span><strong>${esc(c.name)}</strong><b>✓</b></button>`).join(''):''}</div>`;}
+  return html||`<div class="assistant-empty">没有匹配的分类</div>`;
+}
+function openCategoryPicker({title='选择分类',categories=[],selectedId='',allowAll=true,onSelect}){
+  document.getElementById('categoryPickerOverlay')?.remove();
+  const expanded=new Set(),selected=categories.find(c=>c.id===selectedId);if(selected?.parentId)expanded.add(selected.parentId);
+  const overlay=document.createElement('div');overlay.id='categoryPickerOverlay';overlay.className='category-picker-overlay';
+  overlay.innerHTML=`<section class="category-picker-panel"><div class="category-picker-head"><button id="categoryPickerCancel" type="button">取消</button><strong>${esc(title)}</strong><span></span></div><div class="category-picker-body"><div class="category-picker-search search"><input id="categoryPickerSearch" placeholder="搜索分类"></div><div id="categoryPickerRows" class="category-picker-list"></div></div></section>`;document.body.appendChild(overlay);
+  const close=()=>overlay.remove(),draw=()=>{const host=$('#categoryPickerRows',overlay);host.innerHTML=categoryPickerRowsHTML(categories,selectedId,expanded,$('#categoryPickerSearch',overlay).value,allowAll);$$('.category-expand',host).forEach(btn=>btn.onclick=e=>{e.stopPropagation();const id=btn.dataset.expandId;if(expanded.has(id))expanded.delete(id);else expanded.add(id);draw();});$$('[data-category-id]',host).forEach(btn=>btn.onclick=()=>{const id=btn.dataset.categoryId,node=categories.find(c=>c.id===id)||null;close();onSelect?.(id,node);});};
+  $('#categoryPickerCancel',overlay).onclick=close;$('#categoryPickerSearch',overlay).oninput=draw;overlay.addEventListener('click',e=>{if(e.target===overlay)close();});draw();
+}
 async function renderProducts(){
   setHeader('商品管理','查询、编辑、复制、批量上传',{label:'＋',onClick:()=>openProductForm()});
   const [allProducts,categories]=await Promise.all([dbAll('products'),dbAll('categories')]);
-  const products=allProducts.filter(p=>!p.historicalOnly);
-  const activeProducts=products.filter(p=>n(p.stock)>0), soldOutCount=products.length-activeProducts.length;
-  const qty=activeProducts.reduce((s,p)=>s+n(p.stock),0), cost=activeProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
+  const products=allProducts.filter(p=>!p.historicalOnly);let selectedCategoryId='__all__';
+  const selectedLabel=()=>{if(selectedCategoryId==='__all__')return '全部分类';if(selectedCategoryId==='__uncategorized__')return '未分类';const c=categories.find(x=>x.id===selectedCategoryId);return c?c.name:'全部分类';};
   $('#main').innerHTML=`
-    <div class="grid-3">
-      <div class="metric compact"><div class="label">在售商品</div><div class="value">${activeProducts.length}</div><div class="hint">售罄隐藏 ${soldOutCount}</div></div>
-      <div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(qty)}</div></div>
-      <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(cost)}</div></div>
-    </div>
-    <div class="product-filter-row" style="margin-top:12px"><div class="search"><input id="productSearch" placeholder="名称 / 编码 / 颜色"></div><select id="categoryFilter" class="filter-select"><option value="">全部分类</option>${categories.map(c=>`<option>${esc(c.name)}</option>`).join('')}</select><select id="stockFilter" class="filter-select"><option value="in" selected>有库存</option><option value="">全部</option><option value="low">低库存（1件）</option><option value="out">已售罄</option></select></div>
+    <div class="grid-3"><div class="metric compact"><div class="label">商品数量</div><div class="value">${products.length}</div></div><div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(products.reduce((a,p)=>a+n(p.stock),0))}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(products.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0))}</div></div></div>
+    <div class="product-filter-row" style="margin-top:12px"><div class="search"><input id="productSearch" placeholder="名称 / 编码 / 颜色"></div><button id="categoryFilterBtn" class="filter-select category-filter-btn" type="button">全部分类</button><select id="stockFilter" class="filter-select"><option value="in" selected>有库存</option><option value="">全部库存</option><option value="low">低库存（1件）</option><option value="out">已售罄</option></select></div>
     <div class="btn-row" style="margin-bottom:10px"><button class="btn secondary small" id="batchImport">批量上传</button><button class="btn secondary small" id="manageCategory">分类管理</button><button class="btn secondary small" id="exportProducts">导出商品</button></div>
     <div id="productList" class="list"></div>`;
+  const stockOK=p=>{const s=$('#stockFilter').value;return s==='in'?n(p.stock)>0:s==='low'?n(p.stock)===1:s==='out'?n(p.stock)<=0:true;};
   const draw=()=>{
-    const q=$('#productSearch').value.trim().toLowerCase(), cat=$('#categoryFilter').value, stock=$('#stockFilter').value;
-    const stockOK=p=>!stock||(stock==='in'&&n(p.stock)>0)||(stock==='low'&&n(p.stock)>0&&n(p.stock)<=1)||(stock==='out'&&n(p.stock)<=0);
-    const rows=products.filter(p=>(!cat||p.category===cat)&&stockOK(p)&&(!q||[p.name,p.code,p.color,p.category].some(v=>String(v||'').toLowerCase().includes(q)))).sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
-    $('#productList').innerHTML=rows.length?rows.map(productListItem).join(''):emptyState('⌕','没有找到商品','可调整关键词或分类');
-    $$('#productList [data-product-id]').forEach(el=>el.onclick=()=>navigate('product-detail',{id:el.dataset.productId}));
+    const q=$('#productSearch').value.trim().toLowerCase(),stock=$('#stockFilter').value;const selectedNode=categories.find(c=>c.id===selectedCategoryId)||({id:selectedCategoryId});
+    const rows=products.filter(p=>(selectedCategoryId==='__all__'||categoryNodeMatchesProduct(selectedNode,p,categories))&&stockOK(p)&&(!q||[p.name,p.code,p.color,p.category,categoryPathLabel(p.category,categories)].some(v=>String(v||'').toLowerCase().includes(q)))).sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
+    $('#productList').innerHTML=rows.length?rows.map(p=>productListItem(p,categories)).join(''):emptyState('⌕','没有找到商品','可调整关键词或分类');$$('#productList [data-product-id]').forEach(el=>el.onclick=()=>navigate('product-detail',{id:el.dataset.productId}));
+    $('#categoryFilterBtn').textContent=selectedLabel();
   };
-  draw(); $('#productSearch').oninput=draw; $('#categoryFilter').onchange=draw; $('#stockFilter').onchange=draw;
-  $('#batchImport').onclick=openBatchImport; $('#manageCategory').onclick=openCategoryManager; $('#exportProducts').onclick=()=>exportProductsCSV(products);
+  draw();$('#productSearch').oninput=draw;$('#stockFilter').onchange=draw;$('#categoryFilterBtn').onclick=()=>openCategoryPicker({categories,selectedId:selectedCategoryId,allowAll:true,onSelect:id=>{selectedCategoryId=id;draw();}});
+  $('#batchImport').onclick=openBatchImport;$('#manageCategory').onclick=openCategoryManager;$('#exportProducts').onclick=()=>exportProductsCSV(products);
 }
 
 async function openProductForm(product=null,{copy=false}={}){
@@ -518,7 +641,7 @@ async function openProductForm(product=null,{copy=false}={}){
     <form id="productForm">
       <div class="form-group"><label class="form-label">商品图片</label><label class="upload-box" for="productImage">点击选择图片<br>建议上传正方形或竖图</label><input id="productImage" type="file" accept="image/*" class="hidden"><div id="productImagePreview" class="upload-preview">${p.image?`<img src="${p.image}" alt="">`:''}</div></div>
       <div class="form-group"><label class="form-label">商品名称 *</label><input class="input" name="name" required value="${esc(p.name||'')}"></div>
-      <div class="form-row"><div class="form-group"><label class="form-label">商品编码</label><input class="input" name="code" value="${esc(p.code||code)}"></div><div class="form-group"><label class="form-label">分类</label><select class="select" name="category"><option value="">未分类</option>${categories.map(c=>`<option ${p.category===c.name?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">商品编码</label><input class="input" name="code" value="${esc(p.code||code)}"></div><div class="form-group"><label class="form-label">分类</label><input type="hidden" name="category" id="productCategoryValue" value="${esc(p.category||'')}"><input type="hidden" name="categoryId" id="productCategoryId" value="${esc(p.categoryId||'')}"><button class="select category-form-picker" id="productCategoryPicker" type="button">${esc(categoryPathLabel(p.category,categories))}</button></div></div>
       <div class="form-group"><label class="form-label">商品颜色</label><input class="input" name="color" value="${esc(p.color||'')}" placeholder="如：白色、菠菜绿、晴水色"></div>
       <div class="form-row three"><div class="form-group"><label class="form-label">成本价</label><input class="input" name="costPrice" type="number" min="0" step="0.01" value="${n(p.costPrice)}"></div><div class="form-group"><label class="form-label">销售价</label><input class="input" name="salePrice" type="number" min="0" step="0.01" value="${n(p.salePrice)}"></div><div class="form-group"><label class="form-label">库存</label><input class="input" name="stock" type="number" min="0" step="1" value="${copy?0:n(p.stock)}" ${product&&!copy?'readonly':''}></div></div>
       ${product&&!copy?`<div class="notice warn">编辑商品时库存不可直接改，请使用“盘点”或“入库/出库”，这样库存流水不会丢失。</div>`:''}
@@ -526,12 +649,13 @@ async function openProductForm(product=null,{copy=false}={}){
       <button class="btn block" type="submit">保存商品</button>
     </form>`,{guardClose:()=>{if(!window.__mocuiProductDirty)return true;return window.confirm('商品内容尚未保存。确定退出吗？草稿会保留在这台手机。');},onOpen:root=>{
       let image=p.image||'';window.__mocuiProductDirty=false;
-      let draftTimer=null;const saveDraft=()=>{if(product||copy)return;clearTimeout(draftTimer);draftTimer=setTimeout(()=>{const fd=new FormData($('#productForm',root));saveLocalDraft('mocui_product_draft_v1',{name:String(fd.get('name')||''),code:String(fd.get('code')||''),category:String(fd.get('category')||''),color:String(fd.get('color')||''),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:n(fd.get('stock')),note:String(fd.get('note')||''),image});},250);};
+      $('#productCategoryPicker').onclick=()=>openCategoryPicker({title:'选择商品分类',categories,selectedId:$('#productCategoryId').value,allowAll:false,onSelect:(id,node)=>{if(id==='__uncategorized__'||!node){$('#productCategoryId').value='';$('#productCategoryValue').value='';$('#productCategoryPicker').textContent='未分类';}else{$('#productCategoryId').value=id;$('#productCategoryValue').value=categoryFlatValue(node,categories);$('#productCategoryPicker').textContent=categoryPathLabel(categoryFlatValue(node,categories),categories);}window.__mocuiProductDirty=true;saveDraft?.();}});
+      let draftTimer=null;const saveDraft=()=>{if(product||copy)return;clearTimeout(draftTimer);draftTimer=setTimeout(()=>{const fd=new FormData($('#productForm',root));saveLocalDraft('mocui_product_draft_v1',{name:String(fd.get('name')||''),code:String(fd.get('code')||''),category:String(fd.get('category')||''),categoryId:String(fd.get('categoryId')||''),color:String(fd.get('color')||''),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:n(fd.get('stock')),note:String(fd.get('note')||''),image});},250);};
       $('#productForm',root).addEventListener('input',()=>{window.__mocuiProductDirty=true;saveDraft();});
       $('#productImage',root).onchange=async e=>{const f=e.target.files[0]; if(!f)return; image=await compressImage(f);window.__mocuiProductDirty=true;saveDraft(); $('#productImagePreview',root).innerHTML=`<img src="${image}" alt="">`;};
       $('#productForm',root).onsubmit=async e=>{
-        e.preventDefault(); const fd=new FormData(e.target); const oldStock=n(p.stock), newStock=n(fd.get('stock'));
-        const obj={...(product&&!copy?p:{}),id:copy||!product?uid('prod'):p.id,name:String(fd.get('name')).trim(),code:String(fd.get('code')).trim()||await nextProductCode(),category:String(fd.get('category')),color:String(fd.get('color')).trim(),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:product&&!copy?oldStock:newStock,note:String(fd.get('note')).trim(),image,createdAt:copy||!product?nowISO():p.createdAt,updatedAt:nowISO()};
+        e.preventDefault(); const fd=new FormData(e.target); const oldStock=n(p.stock), newStock=n(fd.get('stock')),catLink=await ensureCategoryTreeValue(String(fd.get('category')||''));
+        const obj={...(product&&!copy?p:{}),id:copy||!product?uid('prod'):p.id,name:String(fd.get('name')).trim(),code:String(fd.get('code')).trim()||await nextProductCode(),category:catLink.value,categoryId:String(fd.get('categoryId')||catLink.categoryId||''),color:String(fd.get('color')).trim(),costPrice:n(fd.get('costPrice')),salePrice:n(fd.get('salePrice')),stock:product&&!copy?oldStock:newStock,note:String(fd.get('note')).trim(),image,createdAt:copy||!product?nowISO():p.createdAt,updatedAt:nowISO()};
         if(!obj.name){showToast('请填写商品名称');return;}
         const before=product?auditSafe(product):null;await dbPut('products',obj);
         if((copy||!product)&&obj.stock!==0) await dbPut('stockMoves',{id:uid('move'),productId:obj.id,productCode:obj.code,productName:obj.name,type:'initial',qtyChange:obj.stock,beforeStock:0,afterStock:obj.stock,refType:'product',refId:obj.id,note:'新建商品初始库存',createdAt:nowISO()});
@@ -541,27 +665,19 @@ async function openProductForm(product=null,{copy=false}={}){
 }
 
 async function openCategoryManager(){
+  let expanded=new Set();
   const draw=async()=>{
-    const categories=(await dbAll('categories')).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
-    $('#categoryRows').innerHTML=categories.map(c=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(c.name)}</div></div><button class="btn small secondary edit-cat" data-id="${c.id}">修改</button><button class="btn small danger del-cat" data-id="${c.id}">删除</button></div>`).join('')||emptyState('◫','暂无分类');
-    $$('.edit-cat').forEach(b=>b.onclick=async()=>{const c=await dbGet('categories',b.dataset.id); const name=prompt('修改分类名称',c.name); if(name&&name.trim()){const products=await dbAll('products'); for(const p of products.filter(x=>x.category===c.name)){p.category=name.trim();await dbPut('products',p);} c.name=name.trim();await dbPut('categories',c);draw();}});
-    $$('.del-cat').forEach(b=>b.onclick=async()=>{if(await confirmDialog('删除分类后，商品会变为未分类。确定删除？')){const c=await dbGet('categories',b.dataset.id); const products=await dbAll('products'); for(const p of products.filter(x=>x.category===c.name)){p.category='';await dbPut('products',p);} await dbDelete('categories',c.id);draw();}});
+    const categories=await dbAll('categories'),{roots,children}=categoryTreeData(categories);const host=$('#categoryRows');if(!host)return;
+    if(!expanded.size)roots.slice(0,4).forEach(r=>expanded.add(r.id));
+    host.innerHTML=roots.map(root=>{const kids=children.get(root.id)||[],open=expanded.has(root.id);return `<div class="category-manager-group"><div class="category-manager-row root"><button class="category-expand ${kids.length?'':'empty'}" data-root-toggle="${root.id}" type="button">${kids.length?(open?'▾':'▸'):''}</button><div class="category-manager-name"><strong>${esc(root.name)}</strong><small>${kids.length} 个子分类</small></div><button class="category-inline-action add-child" data-id="${root.id}" type="button">＋子分类</button><button class="category-inline-action edit-cat" data-id="${root.id}" type="button">修改</button><button class="category-inline-action danger del-cat" data-id="${root.id}" type="button">删除</button></div>${open?kids.map(child=>`<div class="category-manager-row child"><span></span><div class="category-manager-name"><strong>${esc(child.name)}</strong><small>${esc(categoryFlatValue(child,categories))}</small></div><button class="category-inline-action edit-cat" data-id="${child.id}" type="button">修改</button><button class="category-inline-action danger del-cat" data-id="${child.id}" type="button">删除</button></div>`).join(''):''}</div>`;}).join('')||emptyState('◫','暂无分类');
+    $$('[data-root-toggle]',host).forEach(b=>b.onclick=()=>{expanded.has(b.dataset.rootToggle)?expanded.delete(b.dataset.rootToggle):expanded.add(b.dataset.rootToggle);draw();});
+    $$('.add-child',host).forEach(b=>b.onclick=async()=>{const root=await dbGet('categories',b.dataset.id),name=prompt(`在「${root.name}」下新增子分类`,'');if(!name||!name.trim())return;const all=await dbAll('categories');const fullName=`${root.prefix||root.fullName||root.name}${categoryLegacySuffix(name.trim())}`;if(all.some(c=>cleanCategoryValue(categoryFlatValue(c,all))===cleanCategoryValue(fullName))){showToast('这个分类已经存在');return;}await dbPut('categories',makeChildCategory(root,name.trim(),fullName,(all.filter(c=>c.parentId===root.id).length+1)*10));expanded.add(root.id);draw();});
+    $$('.edit-cat',host).forEach(b=>b.onclick=async()=>{const c=await dbGet('categories',b.dataset.id),name=prompt('修改分类显示名称',c.name);if(name&&name.trim()){c.name=name.trim();c.updatedAt=nowISO();await dbPut('categories',c);draw();}});
+    $$('.del-cat',host).forEach(b=>b.onclick=async()=>{const categories=await dbAll('categories'),c=categories.find(x=>x.id===b.dataset.id);if(!c)return;const deleteNodes=c.parentId?[c]:[c,...categories.filter(x=>x.parentId===c.id)],ids=new Set(deleteNodes.map(x=>x.id)),values=new Set(deleteNodes.flatMap(x=>[categoryFlatValue(x,categories),...(x.aliases||[])]).map(cleanCategoryValue));if(!await confirmDialog(c.parentId?'删除这个子分类后，对应商品会变为未分类。确定删除？':`删除一级分类「${c.name}」及其 ${deleteNodes.length-1} 个子分类？对应商品会变为未分类。`))return;const products=await dbAll('products');for(const p of products.filter(x=>ids.has(x.categoryId)||values.has(cleanCategoryValue(x.category)))){p.category='';p.categoryId='';p.updatedAt=nowISO();await dbPut('products',p);}for(const row of deleteNodes)await dbDelete('categories',row.id);draw();});
   };
-  openModal('分类管理',`<div class="form-row"><input id="newCategory" class="input" placeholder="输入新分类"><button id="addCategory" class="btn">添加</button></div><div class="spacer"></div><div id="categoryRows" class="list"></div>`,{onOpen:()=>{draw();$('#addCategory').onclick=async()=>{const name=$('#newCategory').value.trim();if(!name)return;await dbPut('categories',{id:uid('cat'),name,createdAt:nowISO()});$('#newCategory').value='';draw();};}});
+  openModal('分类管理',`<div class="category-manager-toolbar"><button id="addRootCategory" class="btn block">＋ 新增一级分类</button><small>一级按玉种/系列，展开后管理手串、挂件、项链等子分类。</small></div><div id="categoryRows" class="category-manager-list"></div>`,{full:true,onOpen:()=>{draw();$('#addRootCategory').onclick=async()=>{const name=prompt('新增一级分类','');if(!name||!name.trim())return;const categories=await dbAll('categories');if(categories.some(c=>!c.parentId&&c.name===name.trim())){showToast('一级分类已存在');return;}const root=makeRootCategory(name.trim(),name.trim(),(categoryTreeData(categories).roots.length+1)*10);await dbPut('categories',root);expanded.add(root.id);draw();};}});
 }
 
-function parseCSV(text){
-  const rows=[]; let row=[],cell='',quoted=false;
-  for(let i=0;i<text.length;i++){
-    const ch=text[i],next=text[i+1];
-    if(ch==='"'&&quoted&&next==='"'){cell+='"';i++;}
-    else if(ch==='"'){quoted=!quoted;}
-    else if(ch===','&&!quoted){row.push(cell);cell='';}
-    else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&next==='\n')i++;row.push(cell);cell='';if(row.some(x=>x.trim()))rows.push(row);row=[];}
-    else cell+=ch;
-  }
-  row.push(cell); if(row.some(x=>x.trim())) rows.push(row); return rows;
-}
 async function openBatchImport(){
   openModal('批量上传商品',`
     <div class="notice warn">CSV 表头：商品名称、分类、颜色、成本价、销售价、库存数量、商品编码。编码留空会自动生成。批量图片可在导入后逐个商品补充。</div>
@@ -569,7 +685,7 @@ async function openBatchImport(){
     <div id="csvPreview" class="spacer"></div><button id="doImport" class="btn block" disabled>确认导入</button>`,{onOpen:()=>{
       let parsed=[];
       $('#csvFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;const text=await readFileAsText(f);const rows=parseCSV(text);if(rows.length<2){showToast('CSV 没有商品数据');return;}const headers=rows[0].map(x=>x.trim());parsed=rows.slice(1).map(r=>Object.fromEntries(headers.map((h,i)=>[h,(r[i]||'').trim()]))).filter(x=>x['商品名称']);$('#csvPreview').innerHTML=`<div class="notice success">识别到 ${parsed.length} 个商品</div>`;$('#doImport').disabled=!parsed.length;};
-      $('#doImport').onclick=async()=>{for(const row of parsed){const stock=n(row['库存数量']), code=row['商品编码']||await nextProductCode(), category=row['分类']||'';if(category){const cats=await dbAll('categories');if(!cats.some(c=>c.name===category))await dbPut('categories',{id:uid('cat'),name:category,createdAt:nowISO()});}const p={id:uid('prod'),name:row['商品名称'],category,color:row['颜色']||'',costPrice:n(row['成本价']),salePrice:n(row['销售价']),stock,code,note:'',image:'',createdAt:nowISO(),updatedAt:nowISO()};await dbPut('products',p);if(stock)await dbPut('stockMoves',{id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type:'initial',qtyChange:stock,beforeStock:0,afterStock:stock,refType:'import',refId:p.id,note:'批量导入初始库存',createdAt:nowISO()});}closeModal();showToast(`已导入 ${parsed.length} 个商品`);navigate('products');};
+      $('#doImport').onclick=async()=>{for(const row of parsed){const stock=n(row['库存数量']), code=row['商品编码']||await nextProductCode(), category=row['分类']||'',catLink=await ensureCategoryTreeValue(category);const p={id:uid('prod'),name:row['商品名称'],category:catLink.value,categoryId:catLink.categoryId,color:row['颜色']||'',costPrice:n(row['成本价']),salePrice:n(row['销售价']),stock,code,note:'',image:'',createdAt:nowISO(),updatedAt:nowISO()};await dbPut('products',p);if(stock)await dbPut('stockMoves',{id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type:'initial',qtyChange:stock,beforeStock:0,afterStock:stock,refType:'import',refId:p.id,note:'批量导入初始库存',createdAt:nowISO()});}closeModal();showToast(`已导入 ${parsed.length} 个商品`);navigate('products');};
     }});
 }
 function csvCell(v){const s=String(v??'');return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;}
@@ -582,10 +698,10 @@ function exportProductsCSV(products){
 async function renderProductDetail(){
   const p=await dbGet('products',appState.params.id); if(!p){showToast('商品不存在');return navigate('products');}
   setHeader(p.name,p.code,{label:'···',onClick:()=>openProductActions(p)});
-  const [sales,moves]=await Promise.all([dbAll('sales'),dbAll('stockMoves')]);
+  const [sales,moves,categories]=await Promise.all([dbAll('sales'),dbAll('stockMoves'),dbAll('categories')]);
   const productSales=sales.filter(s=>saleIsReportActive(s)&&s.items.some(i=>i.productId===p.id));
   $('#main').innerHTML=`
-    <div class="card"><div style="display:flex;gap:14px">${imageThumb({...p,image:p.image})}<div class="item-main"><div class="item-title" style="font-size:18px">${esc(p.name)}</div><div class="item-meta">${esc(p.category||'未分类')} · ${esc(p.color||'未填写颜色')}</div><div class="btn-row" style="margin-top:10px"><span class="badge success">库存 ${fmtInt(p.stock)}</span><span class="badge">成本 ${fmtMoney(p.costPrice)}</span><span class="badge">售价 ${fmtMoney(p.salePrice)}</span></div></div></div>${p.note?`<div class="product-note-box"><strong>商品备注</strong><span>${esc(p.note)}</span></div>`:''}</div>
+    <div class="card"><div style="display:flex;gap:14px">${imageThumb({...p,image:p.image})}<div class="item-main"><div class="item-title" style="font-size:18px">${esc(p.name)}</div><div class="item-meta">${esc(categoryPathLabel(p.category,categories))} · ${esc(p.color||'未填写颜色')}</div><div class="btn-row" style="margin-top:10px"><span class="badge success">库存 ${fmtInt(p.stock)}</span><span class="badge">成本 ${fmtMoney(p.costPrice)}</span><span class="badge">售价 ${fmtMoney(p.salePrice)}</span></div></div></div>${p.note?`<div class="product-note-box"><strong>商品备注</strong><span>${esc(p.note)}</span></div>`:''}</div>
     <div class="grid-3"><button id="productSale" class="btn">销售</button><button id="productEdit" class="btn secondary">编辑</button><button id="productStock" class="btn secondary">盘点</button></div><button id="productContent" class="btn secondary block content-entry-btn">图片 / 视频素材与发布</button>
     <div class="section-title">销售明细 <small>默认近30天</small></div>
     <div class="segment" id="productRange"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div>
@@ -673,23 +789,12 @@ function bindSaleDraft(customerRows=[]){
   $('#viewSales').onclick=()=>{syncSaleFormToDraft();navigate('sales');};
   $('#saveSale').onclick=saveSale;
 }
-async function openProductSelector(selectedIds=[],callback){
-  const [products,categories]=await Promise.all([dbAll('products'),dbAll('categories')]); const selected=new Set(selectedIds);
-  openModal('选择商品',`<div class="toolbar"><div class="search"><input id="selectorSearch" placeholder="名称、编码、颜色"></div><select id="selectorCategory" class="filter-select"><option value="">全部分类</option>${categories.map(c=>`<option>${esc(c.name)}</option>`).join('')}</select></div><div id="selectorList" class="list"></div><div class="sticky-actions"><button id="selectorConfirm" class="btn block">确定选择（${selected.size}）</button></div>`,{full:true,onOpen:()=>{
-    const draw=()=>{const q=$('#selectorSearch').value.trim().toLowerCase(),cat=$('#selectorCategory').value;const rows=products.filter(p=>(!cat||p.category===cat)&&(!q||[p.name,p.code,p.color].some(v=>String(v||'').toLowerCase().includes(q))));$('#selectorList').innerHTML=rows.map(p=>`<label class="list-item"><input class="selector-check" type="checkbox" data-id="${p.id}" ${selected.has(p.id)?'checked':''}>${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">${esc(p.code)} · ${esc(p.color||'')} · 库存 ${fmtInt(p.stock)}</div></div><div class="item-right"><strong>${fmtMoney(p.salePrice)}</strong></div></label>`).join('')||emptyState('⌕','没有商品');$$('.selector-check').forEach(c=>c.onchange=()=>{c.checked?selected.add(c.dataset.id):selected.delete(c.dataset.id);$('#selectorConfirm').textContent=`确定选择（${selected.size}）`;});};draw();$('#selectorSearch').oninput=draw;$('#selectorCategory').onchange=draw;$('#selectorConfirm').onclick=()=>{const rows=products.filter(p=>selected.has(p.id));closeModal();callback(rows);};
+async function openProductSelector(selectedIds,callback){
+  const [products,categories]=await Promise.all([dbAll('products'),dbAll('categories')]);const selected=new Set(selectedIds),available=products.filter(p=>!p.historicalOnly);let selectedCategoryId='__all__';
+  openModal('选择商品',`<div class="toolbar"><div class="search"><input id="selectorSearch" placeholder="名称、编码、颜色"></div><button id="selectorCategoryBtn" class="filter-select category-filter-btn" type="button">全部分类</button></div><div id="selectorList" class="list"></div><div class="sticky-actions"><button id="selectorConfirm" class="btn block">确定选择（${selected.size}）</button></div>`,{full:true,onOpen:()=>{
+    const label=()=>{if(selectedCategoryId==='__all__')return '全部分类';if(selectedCategoryId==='__uncategorized__')return '未分类';return categories.find(c=>c.id===selectedCategoryId)?.name||'全部分类';};
+    const draw=()=>{const q=$('#selectorSearch').value.trim().toLowerCase(),node=categories.find(c=>c.id===selectedCategoryId)||{id:selectedCategoryId};const rows=available.filter(p=>(selectedCategoryId==='__all__'||categoryNodeMatchesProduct(node,p,categories))&&(!q||[p.name,p.code,p.color,categoryPathLabel(p.category,categories)].some(v=>String(v||'').toLowerCase().includes(q))));$('#selectorList').innerHTML=rows.map(p=>`<label class="list-item"><input class="selector-check" type="checkbox" data-id="${p.id}" ${selected.has(p.id)?'checked':''}>${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">${esc(p.code)} · ${esc(categoryPathLabel(p.category,categories))} · ${esc(p.color||'')} · 库存 ${fmtInt(p.stock)}</div></div><div class="item-right"><strong>${fmtMoney(p.salePrice)}</strong></div></label>`).join('')||emptyState('⌕','没有商品');$$('.selector-check').forEach(c=>c.onchange=()=>{c.checked?selected.add(c.dataset.id):selected.delete(c.dataset.id);$('#selectorConfirm').textContent=`确定选择（${selected.size}）`;});$('#selectorCategoryBtn').textContent=label();};draw();$('#selectorSearch').oninput=draw;$('#selectorCategoryBtn').onclick=()=>openCategoryPicker({categories,selectedId:selectedCategoryId,allowAll:true,onSelect:id=>{selectedCategoryId=id;draw();}});$('#selectorConfirm').onclick=()=>{const rows=available.filter(p=>selected.has(p.id));closeModal();callback(rows);};
   }});
-}
-async function saveSale(){
-  syncSaleFormToDraft(); const d=appState.saleDraft; if(!d.items.length){showToast('请选择商品');return;} if(d.items.some(i=>n(i.qty)<=0)){showToast('商品数量必须大于0');return;}
-  try{
-    await validateStock(d.items,-1); const totals=calcSaleTotals(d), id=uid('sale'), orderNo=await nextOrderNo();
-    const customerName=d.customerName||'散客'; let customerId=d.customerId||'';
-    if(customerName!=='散客'&&!customerId){const customers=await dbAll('customers');let c=customers.find(x=>x.name===customerName);if(!c){c={id:uid('cust'),name:customerName,phone:'',note:'销售开单自动创建',createdAt:nowISO(),updatedAt:nowISO()};await dbPut('customers',c);}customerId=c.id;}
-    const createdAt=new Date(d.createdAt).toISOString();
-    for(const i of d.items) await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
-    const sale={id,orderNo,customerId,customerName,items:d.items.map(i=>({...i,qty:n(i.qty),price:n(i.price),costPrice:n(i.costPrice)})),subtotal:totals.subtotal,discountType:d.discountType,discountValue:n(d.discountValue),discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:d.received===''?totals.finalAmount:n(d.received),note:d.note,status:'active',createdAt,cancelledAt:null,updatedAt:nowISO()};
-    await dbPut('sales',sale);await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale); appState.saleDraft=null; showToast(`开单成功：${orderNo}`); navigate('sales',{highlight:id});
-  }catch(err){showToast(err.message);}
 }
 
 async function renderSales(){
@@ -957,28 +1062,30 @@ function buildOperatingAnalytics(sales,products,customers,loans){
   const currentMonth=analyticsMonthKey(now),completeMonths=months.filter(x=>x.key!==currentMonth);
   const seasonMap=new Map();completeMonths.forEach(r=>{const m=n(r.key.split('-')[1]);let x=seasonMap.get(m);if(!x){x={month:m,revenue:0,profit:0,orders:0,years:0};seasonMap.set(m,x);}x.revenue+=r.revenue;x.profit+=r.profit;x.orders+=r.orders;x.years++;});
   const seasonality=[...seasonMap.values()].map(x=>({...x,avgRevenue:x.years?x.revenue/x.years:0,avgProfit:x.years?x.profit/x.years:0,avgOrders:x.years?x.orders/x.years:0})).sort((a,b)=>b.avgRevenue-a.avgRevenue);
-  const categoryMap=new Map(),colorMap=new Map(),productStats=new Map(),customerMap=new Map();
+  const categoryMap=new Map(),subCategoryMap=new Map(),colorMap=new Map(),productStats=new Map(),customerMap=new Map();
   activeSales.forEach(s=>{
     const customer=s.customerName||'散客';let cu=customerMap.get(customer);if(!cu){cu={name:customer,amount:0,profit:0,orders:0,qty:0};customerMap.set(customer,cu);}cu.amount+=n(s.finalAmount);cu.orders++;cu.qty+=(s.items||[]).reduce((a,i)=>a+n(i.qty),0);
-    (s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),cost=n(i.costPrice)*n(i.qty),profit=net-cost,cat=p.category||i.category||'未分类',color=String(i.color||p.color||'未填写').trim()||'未填写';
+    (s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),cost=n(i.costPrice)*n(i.qty),profit=net-cost,rawCat=p.category||i.category||'未分类',cat=categoryRootLabel(rawCat),sub=categoryChildLabel(rawCat),color=String(i.color||p.color||'未填写').trim()||'未填写';
       let c=categoryMap.get(cat);if(!c){c={name:cat,amount:0,profit:0,qty:0,orders:new Set()};categoryMap.set(cat,c);}c.amount+=net;c.profit+=profit;c.qty+=n(i.qty);c.orders.add(s.id);
+      const subKey=`${cat}::${sub}`;let sc=subCategoryMap.get(subKey);if(!sc){sc={name:`${cat} / ${sub}`,root:cat,child:sub,amount:0,profit:0,qty:0,orders:new Set()};subCategoryMap.set(subKey,sc);}sc.amount+=net;sc.profit+=profit;sc.qty+=n(i.qty);sc.orders.add(s.id);
       let co=colorMap.get(color);if(!co){co={name:color,amount:0,profit:0,qty:0,orders:new Set()};colorMap.set(color,co);}co.amount+=net;co.profit+=profit;co.qty+=n(i.qty);co.orders.add(s.id);
       let ps=productStats.get(i.productId);if(!ps){ps={id:i.productId,name:i.productName||p.name||'未命名',amount:0,profit:0,qty:0,lastSaleAt:'',category:cat,color};productStats.set(i.productId,ps);}ps.amount+=net;ps.profit+=profit;ps.qty+=n(i.qty);if(!ps.lastSaleAt||new Date(s.createdAt)>new Date(ps.lastSaleAt))ps.lastSaleAt=s.createdAt;
       cu.profit+=profit;
     });
   });
   const categories=[...categoryMap.values()].map(x=>({...x,orders:x.orders.size,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
+  const subcategories=[...subCategoryMap.values()].map(x=>({...x,orders:x.orders.size,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
   const colors=[...colorMap.values()].map(x=>({...x,orders:x.orders.size,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
   const customersRank=[...customerMap.values()].filter(x=>x.name!=='散客').map(x=>({...x,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
   const inventoryValue=catalog.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0),inventoryQty=catalog.reduce((a,p)=>a+n(p.stock),0);
-  const inventoryByCategory=new Map();catalog.forEach(p=>{const cat=p.category||'未分类',value=n(p.stock)*n(p.costPrice);let x=inventoryByCategory.get(cat);if(!x){x={name:cat,value:0,qty:0,sku:0};inventoryByCategory.set(cat,x);}x.value+=value;x.qty+=n(p.stock);x.sku++;});
+  const inventoryByCategory=new Map();catalog.forEach(p=>{const cat=categoryRootLabel(p.category),value=n(p.stock)*n(p.costPrice);let x=inventoryByCategory.get(cat);if(!x){x={name:cat,value:0,qty:0,sku:0};inventoryByCategory.set(cat,x);}x.value+=value;x.qty+=n(p.stock);x.sku++;});
   const inventoryCategories=[...inventoryByCategory.values()].sort((a,b)=>b.value-a.value);
   const slowProducts=catalog.filter(p=>n(p.stock)>0).map(p=>{const ps=productStats.get(p.id),last=ps?.lastSaleAt?new Date(ps.lastSaleAt):null,days=last?Math.floor((now-last)/86400000):9999;return {id:p.id,name:p.name,category:p.category||'未分类',color:p.color||'未填写',stock:n(p.stock),value:n(p.stock)*n(p.costPrice),days,qtySold:ps?.qty||0};}).filter(x=>x.days>=90).sort((a,b)=>b.value-a.value);
   const missingColor=catalog.filter(p=>!String(p.color||'').trim()).length,colorCompletion=catalog.length?1-missingColor/catalog.length:0;
-  const recentCategoryMap=new Map(),recentColorMap=new Map();recent90.forEach(s=>(s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),cat=p.category||'未分类',color=String(i.color||p.color||'未填写').trim()||'未填写';let c=recentCategoryMap.get(cat)||{name:cat,amount:0,qty:0};c.amount+=net;c.qty+=n(i.qty);recentCategoryMap.set(cat,c);let co=recentColorMap.get(color)||{name:color,amount:0,qty:0};co.amount+=net;co.qty+=n(i.qty);recentColorMap.set(color,co);}));
-  const recentCategories=[...recentCategoryMap.values()].sort((a,b)=>b.amount-a.amount),recentColors=[...recentColorMap.values()].sort((a,b)=>b.amount-a.amount);
+  const recentCategoryMap=new Map(),recentSubCategoryMap=new Map(),recentColorMap=new Map();recent90.forEach(s=>(s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),rawCat=p.category||i.category||'未分类',cat=categoryRootLabel(rawCat),sub=categoryChildLabel(rawCat),color=String(i.color||p.color||'未填写').trim()||'未填写';let c=recentCategoryMap.get(cat)||{name:cat,amount:0,qty:0};c.amount+=net;c.qty+=n(i.qty);recentCategoryMap.set(cat,c);const subKey=`${cat}::${sub}`;let sc=recentSubCategoryMap.get(subKey)||{name:`${cat} / ${sub}`,root:cat,child:sub,amount:0,qty:0};sc.amount+=net;sc.qty+=n(i.qty);recentSubCategoryMap.set(subKey,sc);let co=recentColorMap.get(color)||{name:color,amount:0,qty:0};co.amount+=net;co.qty+=n(i.qty);recentColorMap.set(color,co);}));
+  const recentCategories=[...recentCategoryMap.values()].sort((a,b)=>b.amount-a.amount),recentSubcategories=[...recentSubCategoryMap.values()].sort((a,b)=>b.amount-a.amount),recentColors=[...recentColorMap.values()].sort((a,b)=>b.amount-a.amount);
   const openLoans=(loans||[]).filter(l=>loanIsOpen(l)),loanQty=openLoans.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+loanItemRemaining(l,i),0),0);
-  return {activeSales,catalog,months,seasonality,categories,colors,customersRank,inventoryCategories,slowProducts,recent30,prev30,recent90,recentRevenue,prevRevenue,recentProfit,recentCost,recentCategories,recentColors,inventoryValue,inventoryQty,colorCompletion,missingColor,customerCount:(customers||[]).length,openLoans:openLoans.length,loanQty};
+  return {activeSales,catalog,months,seasonality,categories,subcategories,colors,customersRank,inventoryCategories,slowProducts,recent30,prev30,recent90,recentRevenue,prevRevenue,recentProfit,recentCost,recentCategories,recentSubcategories,recentColors,inventoryValue,inventoryQty,colorCompletion,missingColor,customerCount:(customers||[]).length,openLoans:openLoans.length,loanQty};
 }
 function operatingAssistantInsights(a){
   const out=[],trend=analyticsChange(a.recentRevenue,a.prevRevenue),topCat=analyticsTop(a.recentCategories)||analyticsTop(a.categories),topColor=analyticsTop(a.recentColors)||analyticsTop(a.colors),topInv=analyticsTop(a.inventoryCategories),slow=analyticsTop(a.slowProducts);
@@ -992,16 +1099,19 @@ function operatingAssistantInsights(a){
 }
 function operatingAssistantAnswer(question,a){
   const q=String(question||'').trim();if(!q)return '可以问：旺季淡季、什么品类卖得好、什么颜色卖得好、哪些库存占钱、客户贡献、最近利润怎么样。';
+  const matchedCategoryRoot=(a.recentCategories.length?a.recentCategories:a.categories).find(x=>{const spec=CATEGORY_ROOT_SPECS.find(s=>s.name===x.name),aliases=[String(x.name||''),String(x.name||'').replace(/\s*\/\s*/g,''),...(spec?.prefixes||[])];return aliases.some(alias=>alias&&q.includes(alias));});
   if(/旺季|淡季|月份|季节/.test(q)){
     if(!a.seasonality.length)return '目前完整历史月份不足，等2024、2025等历史销售导入后，旺淡季判断会更可靠。';
     const top=a.seasonality.slice(0,3),bottom=[...a.seasonality].sort((x,y)=>x.avgRevenue-y.avgRevenue).slice(0,3);
     return `按已导入的完整月份平均销售额看，旺季偏向 ${top.map(x=>`${analyticsMonthName(x.month)}（均 ${fmtMoney(x.avgRevenue)}）`).join('、')}；相对淡季是 ${bottom.map(x=>`${analyticsMonthName(x.month)}（均 ${fmtMoney(x.avgRevenue)}）`).join('、')}。建议至少导入2个完整年度后再据此制定年度备货预算。`;
   }
-  if(/品类|分类|什么货|卖得好/.test(q)){
-    const list=(a.recentCategories.length?a.recentCategories:a.categories).slice(0,5);if(!list.length)return '当前没有可用于品类分析的销售数据。';
-    return `按${a.recentCategories.length?'近90天':'全部历史'}销售额，前五品类是：${list.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。建议优先结合毛利率与库存资金占用决定补货，不只看销量。`;
+  if(/品类|分类|什么货|卖得好/.test(q)||matchedCategoryRoot){
+    const roots=(a.recentCategories.length?a.recentCategories:a.categories),matched=matchedCategoryRoot;
+    if(matched){const subs=(a.recentSubcategories.length?a.recentSubcategories:a.subcategories).filter(x=>x.root===matched.name).slice(0,5);return `「${matched.name}」${a.recentCategories.length?'近90天':'历史累计'}销售 ${fmtMoney(matched.amount)} / ${fmtInt(matched.qty)}件。${subs.length?`内部前几类：${subs.map((x,i)=>`${i+1}.${x.child} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。`:''}建议再结合毛利率和库存占用决定补货。`;}
+    const list=roots.slice(0,5);if(!list.length)return '当前没有可用于品类分析的销售数据。';
+    return `按${a.recentCategories.length?'近90天':'全部历史'}销售额，前五玉种/系列是：${list.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。可继续问“碧玉里面什么卖得好”查看子分类。`;
   }
-  if(/颜色|色系|白玉|碧玉|绿色/.test(q)){
+  if(/颜色|色系|白色|绿色|粉色|青色|黄色|黑色/.test(q)){
     const list=(a.recentColors.length?a.recentColors:a.colors).filter(x=>x.name!=='未填写').slice(0,5);if(!list.length)return `当前颜色字段不足，商品颜色完整度 ${(a.colorCompletion*100).toFixed(0)}%。先补齐颜色标签后再判断会更准确。`;
     return `按${a.recentColors.length?'近90天':'全部历史'}销售额，颜色前五是：${list.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。目前颜色字段完整度 ${(a.colorCompletion*100).toFixed(0)}%。`;
   }
@@ -1024,7 +1134,7 @@ function renderOperatingAssistant(host,a){
     <div class="section-title">本期诊断 <small>自动生成</small></div><div class="assistant-diagnosis">${insights.map(x=>`<p>${esc(x)}</p>`).join('')}</div>
     <div class="grid-3 assistant-metrics"><div class="metric compact"><div class="label">近30天销售</div><div class="value">${fmtMoney(a.recentRevenue)}</div><div class="hint">${analyticsChangeText(a.recentRevenue,a.prevRevenue)}</div></div><div class="metric compact"><div class="label">近30天毛利</div><div class="value">${fmtMoney(a.recentProfit)}</div><div class="hint">毛利率 ${a.recentRevenue?((a.recentProfit/a.recentRevenue)*100).toFixed(1):0}%</div></div><div class="metric compact"><div class="label">库存资金</div><div class="value">${fmtMoney(a.inventoryValue)}</div><div class="hint">${fmtInt(a.inventoryQty)} 件库存</div></div></div>
     <div class="section-title">问经营助手 <small>支持自然语言关键词</small></div><div class="assistant-ask"><div class="assistant-ask-row"><input id="assistantQuestion" class="input" placeholder="例如：最近什么品类卖得最好？"><button id="assistantAskBtn" class="btn">分析</button></div><div class="assistant-chips"><button data-q="旺季淡季是什么时候">旺季淡季</button><button data-q="什么品类卖得好">品类</button><button data-q="什么颜色卖得好">颜色</button><button data-q="哪些库存占钱卖不动">库存</button><button data-q="哪些客户贡献最高">客户</button></div><div id="assistantAnswer" class="assistant-answer">${esc(operatingAssistantAnswer('综合分析',a))}</div></div>
-    <div class="section-title">品类销售 <small>${a.recentCategories.length?'近90天':'历史累计'}</small></div><div class="assistant-rank-card">${assistantRankingRows(a.recentCategories.length?a.recentCategories:a.categories)}</div>
+    <div class="section-title">玉种 / 系列销售 <small>${a.recentCategories.length?'近90天':'历史累计'}</small></div><div class="assistant-rank-card">${assistantRankingRows(a.recentCategories.length?a.recentCategories:a.categories)}</div>
     <div class="section-title">颜色销售 <small>颜色完整度 ${(a.colorCompletion*100).toFixed(0)}%</small></div><div class="assistant-rank-card">${assistantRankingRows((a.recentColors.length?a.recentColors:a.colors).filter(x=>x.name!=='未填写'))}</div>
     <div class="section-title">旺季 / 淡季 <small>按完整月份平均销售额</small></div><div class="grid-2"><div class="assistant-season-card"><b>历史旺季</b>${topSeason.length?topSeason.map(x=>`<span>${analyticsMonthName(x.month)} <strong>${fmtMoney(x.avgRevenue)}</strong></span>`).join(''):'<span>历史月份不足</span>'}</div><div class="assistant-season-card"><b>相对淡季</b>${lowSeason.length?lowSeason.map(x=>`<span>${analyticsMonthName(x.month)} <strong>${fmtMoney(x.avgRevenue)}</strong></span>`).join(''):'<span>历史月份不足</span>'}</div></div>
     <div class="section-title">库存资金占用</div><div class="assistant-rank-card">${assistantRankingRows(a.inventoryCategories,'inventory')}</div>
@@ -1128,10 +1238,10 @@ async function renderQinsilkImport(){
 }
 async function snapshotAllStores(){const stores={};for(const name of STORES)stores[name]=await dbAll(name);return stores;}
 async function restoreStoreSnapshot(stores){window.__cloudImporting=true;try{for(const name of STORES){await dbClear(name,true);for(const row of stores[name]||[])await dbPut(name,row,true);}}finally{window.__cloudImporting=false;}}
-async function ensureQinsilkCategory(name,map){if(!name)return '';const key=normalizeMatchKey(name);if(map.has(key))return map.get(key).name;const row={id:uid('cat'),name,createdAt:nowISO()};await dbPut('categories',row,true);map.set(key,row);return name;}
+async function ensureQinsilkCategory(name,map){const link=await ensureCategoryTreeValue(name);if(name&&map)map.set(normalizeMatchKey(name),{id:link.categoryId,name:link.value});return link;}
 async function importQinsilkProducts(file,batch,result){
   const products=await dbAll('products'),categories=await dbAll('categories'),map=new Map(products.map(p=>[normalizeMatchKey(p.code),p])),catMap=new Map(categories.map(c=>[normalizeMatchKey(c.name),c])),seen=new Set();
-  for(const row of file.normalized){const key=normalizeMatchKey(row.code);if(!row.name||!key){result.invalid++;result.details.push(['商品','无效',row.code||'',`第${row.rowNumber}行缺少名称或货号`]);continue;}if(seen.has(key)){result.skipped++;continue;}seen.add(key);const old=map.get(key),category=await ensureQinsilkCategory(row.category,catMap);const sourceNote=[row.size&&`规格：${row.size}`,row.barcode&&`条码：${row.barcode}`,row.supplier&&`供应商：${row.supplier}`];const product={...(old||{}),id:old?.id||uid('prod'),name:row.name,code:row.code,category,color:row.color||old?.color||'',costPrice:row.costPrice||old?.costPrice||0,salePrice:row.salePrice||old?.salePrice||0,stock:row.hasStock?row.stock:n(old?.stock),note:old?.note||mergeImportedNote('',sourceNote),image:safeQinsilkImage(row.image)||old?.image||'',createdAt:old?.createdAt||row.launchDate||nowISO(),updatedAt:nowISO(),source:'qinsilk',sourceKey:`qinsilk:product:${row.code}`,qinsilk:{barcode:row.barcode,brand:row.brand,supplier:row.supplier,unit:row.unit,size:row.size,material:row.material,status:row.status,wholesalePrice:row.wholesalePrice,retailPrice:row.retailPrice,suggestedPrice:row.suggestedPrice,launchDate:row.launchDate,importBatchId:batch}};await dbPut('products',product,true);map.set(key,product);if(!old&&product.stock){await dbPut('stockMoves',{id:uid('move'),productId:product.id,productCode:product.code,productName:product.name,type:'qinsilk_initial',qtyChange:product.stock,beforeStock:0,afterStock:product.stock,refType:'qinsilk_import',refId:batch,note:'秦丝商品资料导入初始库存',createdAt:nowISO()},true);}old?result.updated++:result.created++;result.details.push(['商品',old?'更新':'新增',row.code,row.name]);}
+  for(const row of file.normalized){const key=normalizeMatchKey(row.code);if(!row.name||!key){result.invalid++;result.details.push(['商品','无效',row.code||'',`第${row.rowNumber}行缺少名称或货号`]);continue;}if(seen.has(key)){result.skipped++;continue;}seen.add(key);const old=map.get(key),categoryLink=await ensureQinsilkCategory(row.category,catMap),category=categoryLink.value;const sourceNote=[row.size&&`规格：${row.size}`,row.barcode&&`条码：${row.barcode}`,row.supplier&&`供应商：${row.supplier}`];const product={...(old||{}),id:old?.id||uid('prod'),name:row.name,code:row.code,category,categoryId:categoryLink.categoryId||old?.categoryId||'',color:row.color||old?.color||'',costPrice:row.costPrice||old?.costPrice||0,salePrice:row.salePrice||old?.salePrice||0,stock:row.hasStock?row.stock:n(old?.stock),note:old?.note||mergeImportedNote('',sourceNote),image:safeQinsilkImage(row.image)||old?.image||'',createdAt:old?.createdAt||row.launchDate||nowISO(),updatedAt:nowISO(),source:'qinsilk',sourceKey:`qinsilk:product:${row.code}`,qinsilk:{barcode:row.barcode,brand:row.brand,supplier:row.supplier,unit:row.unit,size:row.size,material:row.material,status:row.status,wholesalePrice:row.wholesalePrice,retailPrice:row.retailPrice,suggestedPrice:row.suggestedPrice,launchDate:row.launchDate,importBatchId:batch}};await dbPut('products',product,true);map.set(key,product);if(!old&&product.stock){await dbPut('stockMoves',{id:uid('move'),productId:product.id,productCode:product.code,productName:product.name,type:'qinsilk_initial',qtyChange:product.stock,beforeStock:0,afterStock:product.stock,refType:'qinsilk_import',refId:batch,note:'秦丝商品资料导入初始库存',createdAt:nowISO()},true);}old?result.updated++:result.created++;result.details.push(['商品',old?'更新':'新增',row.code,row.name]);}
 }
 async function importQinsilkCustomers(file,batch,result){
   const customers=await dbAll('customers'),byPhone=new Map(customers.filter(c=>c.phone).map(c=>[normalizeMatchKey(c.phone),c])),byName=new Map(customers.map(c=>[normalizeMatchKey(c.name),c])),seen=new Set();
@@ -1344,6 +1454,7 @@ async function init(){
   setBootStatus('正在读取本机数据…');
   db=await openDB();
   await ensureDefaults();
+  await migrateCategoryTreeV1();
   setupViewportBehavior();
   history.scrollRestoration='manual';
   bindPrimaryNavigation();
@@ -1365,11 +1476,12 @@ async function init(){
   window.__mocuiInitialPullPromise=initialPull;
   initialPull.then(async()=>{
     await ensureDefaults();
+    const categoryMigrated=await migrateCategoryTreeV1();
     const repairedDuplicates=await reconcileQinsilkHistoricalDuplicates();
-    if(repairedDuplicates){try{await CloudSync.push();}catch(_){window.CloudSync?.schedule();}}
+    if(repairedDuplicates||categoryMigrated){try{await CloudSync.push();}catch(_){window.CloudSync?.schedule();}}
     await refreshCurrentPageAfterPull();
     hideInitialSyncPill();
-    if(repairedDuplicates)showToast(`已自动排除 ${repairedDuplicates} 笔秦丝重复历史销售`);
+    if(repairedDuplicates)showToast(`已自动排除 ${repairedDuplicates} 笔秦丝重复历史销售`);else if(categoryMigrated)showToast('分类已自动整理为一级 / 子分类');
   }).catch(()=>{
     hideInitialSyncPill('暂时离线，已显示本机数据');
     showToast('云端同步失败，当前显示本机缓存');

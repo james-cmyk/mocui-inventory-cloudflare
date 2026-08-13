@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.7-operating-assistant';
+const CACHE='mocui-v3.8-category-tree';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.7 经营助手：旺淡季、品类、颜色、库存、客户与自然语言数据问答
+// v3.8 分类树：自动把秦丝扁平分类整理为“玉种/系列 → 子分类”，并同步经营助手按一级分类分析
