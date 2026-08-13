@@ -280,14 +280,21 @@ body{min-height:100dvh}
     margin:0!important;
   }
   #app{
-    /* iOS standalone PWA 的 100dvh 在恢复/状态栏变化后可能短暂变小，
-       导致正常文档流中的 Dock 被整体抬高。高度改由 JS 用真实可用视口像素同步。 */
-    height:var(--app-viewport-height,100vh);
+    /* v3.8.2：安全区由 App 壳层自己承担，避免标题压到 iPhone 状态栏。
+       普通浏览器使用动态视口；安装到主屏幕后改用稳定 large viewport，
+       不再用 JS 猜测 innerHeight / visualViewport 高度。 */
+    height:100dvh;
     min-height:0!important;
     display:flex;
     flex-direction:column;
     overflow:hidden;
     position:relative;
+    padding-top:env(safe-area-inset-top);
+    background:var(--bg);
+  }
+  html.standalone-app #app{
+    height:100vh;
+    height:100lvh;
   }
   .topbar{
     flex:0 0 auto;

@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.8.1-dock-viewport-fix';
+const CACHE='mocui-v3.8.2-safe-area-dock-fix';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.8.1：保留分类树，并修复 iOS standalone PWA Dock 因 100dvh 高度漂移而抬高
+// v3.8.2：恢复 iOS 顶部/底部安全区，移除 JS 视口高度猜测，Dock 保持正常 flex 文档流

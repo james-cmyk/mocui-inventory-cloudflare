@@ -473,6 +473,8 @@ function enhanceCurrentPage(){
 }
 
 function setupViewportBehavior(){
+  const standalone=window.matchMedia?.('(display-mode: standalone)')?.matches||window.navigator.standalone===true;
+  document.documentElement.classList.toggle('standalone-app',!!standalone);
   const viewport=window.visualViewport;
   if(!viewport)return;
   const isEditableFocused=()=>{
@@ -481,21 +483,12 @@ function setupViewportBehavior(){
     return el.matches('textarea, select, [contenteditable="true"], input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"])');
   };
   const update=()=>{
-    // iOS 在页面高度、地址栏或横向标签变化时也会触发 visualViewport resize。
-    // 只有可编辑控件真正获得焦点并且可视高度明显缩小时，才视为键盘打开。
+    // 这里只处理键盘，不再用 JS 重写整个 App 高度。
+    // 之前用 innerHeight / visualViewport 最大值会丢失 iOS 安全区，造成顶部压状态栏、Dock 留空。
     const viewportShrink=Math.max(0,window.innerHeight-viewport.height);
     const keyboardOpen=isEditableFocused()&&viewportShrink>120;
     document.body.classList.toggle('keyboard-open',keyboardOpen);
-    document.documentElement.style.setProperty('--visual-viewport-height',`${viewport.height}px`);
-
-    // v3.8.1：Dock 保持正常 flex 文档流，只校准整个 App 壳层高度。
-    // standalone PWA 从快捷指令/系统界面返回时，100dvh 偶尔会比真实可用高度少一截，
-    // 于是 Dock 看起来“抬高”。非键盘状态取多个视口高度中的最大有效值；
-    // 键盘打开时则使用 visualViewport.height，避免输入框被键盘遮住。
-    const heights=[window.innerHeight,document.documentElement.clientHeight,viewport.height]
-      .filter(v=>Number.isFinite(v)&&v>0);
-    const shellHeight=keyboardOpen?viewport.height:(heights.length?Math.max(...heights):window.innerHeight);
-    document.documentElement.style.setProperty('--app-viewport-height',`${Math.round(shellHeight)}px`);
+    document.documentElement.style.setProperty('--visual-viewport-height',`${Math.round(viewport.height)}px`);
   };
   viewport.addEventListener('resize',update,{passive:true});
   viewport.addEventListener('scroll',update,{passive:true});
