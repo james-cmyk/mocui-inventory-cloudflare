@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.6.5-qinsilk-reconcile';
+const CACHE='mocui-v3.7-operating-assistant';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.6.5 秦丝历史销售对账：排除与正式开单重复记录，统一利润/实收统计口径
+// v3.7 经营助手：旺淡季、品类、颜色、库存、客户与自然语言数据问答

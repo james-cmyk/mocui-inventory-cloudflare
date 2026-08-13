@@ -932,9 +932,110 @@ async function reconcileQinsilkHistoricalDuplicates(){
   return repaired.length;
 }
 
+function analyticsMonthKey(value){
+  const d=new Date(value);if(Number.isNaN(d.getTime()))return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function analyticsMonthLabel(key){const [y,m]=String(key||'').split('-');return y&&m?`${y}年${n(m)}月`:key||'';}
+function analyticsMonthName(month){return `${n(month)}月`;}
+function analyticsChange(curr,prev){if(!prev)return curr?null:0;return ((curr-prev)/Math.abs(prev))*100;}
+function analyticsChangeText(curr,prev){const rate=analyticsChange(curr,prev);if(rate===null)return '上期无可比数据';if(Math.abs(rate)<.05)return '与上期基本持平';return `${rate>0?'↑':'↓'} ${Math.abs(rate).toFixed(1)}%`;}
+function analyticsAmountLine(row){return row?`${row.name} · ${fmtMoney(row.amount)} · ${fmtInt(row.qty)}件`:'暂无数据';}
+function analyticsTop(list){return Array.isArray(list)&&list.length?list[0]:null;}
+function analyticsPeriodRows(sales,start,end){return sales.filter(x=>saleIsReportActive(x)&&new Date(x.createdAt)>=start&&new Date(x.createdAt)<end);}
+function analyticsRevenue(rows){return rows.reduce((sum,s)=>sum+n(s.finalAmount),0);}
+function analyticsCost(rows){return rows.reduce((sum,s)=>sum+saleCostTotal(s),0);}
+function analyticsQty(rows){return rows.reduce((sum,s)=>sum+(s.items||[]).reduce((a,i)=>a+n(i.qty),0),0);}
+function buildOperatingAnalytics(sales,products,customers,loans){
+  const activeSales=(sales||[]).filter(saleIsReportActive),catalog=(products||[]).filter(p=>!p.historicalOnly),productById=new Map((products||[]).map(p=>[p.id,p]));
+  const now=new Date(),todayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate()),d30=new Date(todayStart);d30.setDate(d30.getDate()-30);const d60=new Date(todayStart);d60.setDate(d60.getDate()-60);const d90=new Date(todayStart);d90.setDate(d90.getDate()-90);
+  const recent30=analyticsPeriodRows(activeSales,d30,new Date(now.getTime()+1000)),prev30=analyticsPeriodRows(activeSales,d60,d30),recent90=analyticsPeriodRows(activeSales,d90,new Date(now.getTime()+1000));
+  const recentRevenue=analyticsRevenue(recent30),prevRevenue=analyticsRevenue(prev30),recentCost=analyticsCost(recent30),recentProfit=recentRevenue-recentCost;
+  const monthMap=new Map();
+  activeSales.forEach(s=>{const key=analyticsMonthKey(s.createdAt);if(!key)return;let r=monthMap.get(key);if(!r){r={key,revenue:0,cost:0,profit:0,orders:0,qty:0};monthMap.set(key,r);}r.revenue+=n(s.finalAmount);r.cost+=saleCostTotal(s);r.profit=r.revenue-r.cost;r.orders++;r.qty+=(s.items||[]).reduce((a,i)=>a+n(i.qty),0);});
+  const months=[...monthMap.values()].sort((a,b)=>a.key.localeCompare(b.key));
+  const currentMonth=analyticsMonthKey(now),completeMonths=months.filter(x=>x.key!==currentMonth);
+  const seasonMap=new Map();completeMonths.forEach(r=>{const m=n(r.key.split('-')[1]);let x=seasonMap.get(m);if(!x){x={month:m,revenue:0,profit:0,orders:0,years:0};seasonMap.set(m,x);}x.revenue+=r.revenue;x.profit+=r.profit;x.orders+=r.orders;x.years++;});
+  const seasonality=[...seasonMap.values()].map(x=>({...x,avgRevenue:x.years?x.revenue/x.years:0,avgProfit:x.years?x.profit/x.years:0,avgOrders:x.years?x.orders/x.years:0})).sort((a,b)=>b.avgRevenue-a.avgRevenue);
+  const categoryMap=new Map(),colorMap=new Map(),productStats=new Map(),customerMap=new Map();
+  activeSales.forEach(s=>{
+    const customer=s.customerName||'散客';let cu=customerMap.get(customer);if(!cu){cu={name:customer,amount:0,profit:0,orders:0,qty:0};customerMap.set(customer,cu);}cu.amount+=n(s.finalAmount);cu.orders++;cu.qty+=(s.items||[]).reduce((a,i)=>a+n(i.qty),0);
+    (s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),cost=n(i.costPrice)*n(i.qty),profit=net-cost,cat=p.category||i.category||'未分类',color=String(i.color||p.color||'未填写').trim()||'未填写';
+      let c=categoryMap.get(cat);if(!c){c={name:cat,amount:0,profit:0,qty:0,orders:new Set()};categoryMap.set(cat,c);}c.amount+=net;c.profit+=profit;c.qty+=n(i.qty);c.orders.add(s.id);
+      let co=colorMap.get(color);if(!co){co={name:color,amount:0,profit:0,qty:0,orders:new Set()};colorMap.set(color,co);}co.amount+=net;co.profit+=profit;co.qty+=n(i.qty);co.orders.add(s.id);
+      let ps=productStats.get(i.productId);if(!ps){ps={id:i.productId,name:i.productName||p.name||'未命名',amount:0,profit:0,qty:0,lastSaleAt:'',category:cat,color};productStats.set(i.productId,ps);}ps.amount+=net;ps.profit+=profit;ps.qty+=n(i.qty);if(!ps.lastSaleAt||new Date(s.createdAt)>new Date(ps.lastSaleAt))ps.lastSaleAt=s.createdAt;
+      cu.profit+=profit;
+    });
+  });
+  const categories=[...categoryMap.values()].map(x=>({...x,orders:x.orders.size,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
+  const colors=[...colorMap.values()].map(x=>({...x,orders:x.orders.size,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
+  const customersRank=[...customerMap.values()].filter(x=>x.name!=='散客').map(x=>({...x,margin:x.amount?x.profit/x.amount:0})).sort((a,b)=>b.amount-a.amount);
+  const inventoryValue=catalog.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0),inventoryQty=catalog.reduce((a,p)=>a+n(p.stock),0);
+  const inventoryByCategory=new Map();catalog.forEach(p=>{const cat=p.category||'未分类',value=n(p.stock)*n(p.costPrice);let x=inventoryByCategory.get(cat);if(!x){x={name:cat,value:0,qty:0,sku:0};inventoryByCategory.set(cat,x);}x.value+=value;x.qty+=n(p.stock);x.sku++;});
+  const inventoryCategories=[...inventoryByCategory.values()].sort((a,b)=>b.value-a.value);
+  const slowProducts=catalog.filter(p=>n(p.stock)>0).map(p=>{const ps=productStats.get(p.id),last=ps?.lastSaleAt?new Date(ps.lastSaleAt):null,days=last?Math.floor((now-last)/86400000):9999;return {id:p.id,name:p.name,category:p.category||'未分类',color:p.color||'未填写',stock:n(p.stock),value:n(p.stock)*n(p.costPrice),days,qtySold:ps?.qty||0};}).filter(x=>x.days>=90).sort((a,b)=>b.value-a.value);
+  const missingColor=catalog.filter(p=>!String(p.color||'').trim()).length,colorCompletion=catalog.length?1-missingColor/catalog.length:0;
+  const recentCategoryMap=new Map(),recentColorMap=new Map();recent90.forEach(s=>(s.items||[]).forEach(i=>{const p=productById.get(i.productId)||{},net=saleItemNetAmount(s,i),cat=p.category||'未分类',color=String(i.color||p.color||'未填写').trim()||'未填写';let c=recentCategoryMap.get(cat)||{name:cat,amount:0,qty:0};c.amount+=net;c.qty+=n(i.qty);recentCategoryMap.set(cat,c);let co=recentColorMap.get(color)||{name:color,amount:0,qty:0};co.amount+=net;co.qty+=n(i.qty);recentColorMap.set(color,co);}));
+  const recentCategories=[...recentCategoryMap.values()].sort((a,b)=>b.amount-a.amount),recentColors=[...recentColorMap.values()].sort((a,b)=>b.amount-a.amount);
+  const openLoans=(loans||[]).filter(l=>loanIsOpen(l)),loanQty=openLoans.reduce((a,l)=>a+(l.items||[]).reduce((b,i)=>b+loanItemRemaining(l,i),0),0);
+  return {activeSales,catalog,months,seasonality,categories,colors,customersRank,inventoryCategories,slowProducts,recent30,prev30,recent90,recentRevenue,prevRevenue,recentProfit,recentCost,recentCategories,recentColors,inventoryValue,inventoryQty,colorCompletion,missingColor,customerCount:(customers||[]).length,openLoans:openLoans.length,loanQty};
+}
+function operatingAssistantInsights(a){
+  const out=[],trend=analyticsChange(a.recentRevenue,a.prevRevenue),topCat=analyticsTop(a.recentCategories)||analyticsTop(a.categories),topColor=analyticsTop(a.recentColors)||analyticsTop(a.colors),topInv=analyticsTop(a.inventoryCategories),slow=analyticsTop(a.slowProducts);
+  if(a.recent30.length){out.push(`近30天销售 ${fmtMoney(a.recentRevenue)}，毛利润 ${fmtMoney(a.recentProfit)}，${trend===null?'上期无可比数据':`较前30天${trend>=0?'增长':'下降'} ${Math.abs(trend).toFixed(1)}%`}。`);}else out.push('近30天暂无销售记录，建议切换到历史月份查看长期结构。');
+  if(topCat)out.push(`近阶段贡献最高的品类是「${topCat.name}」，销售 ${fmtMoney(topCat.amount)}。`);
+  if(topColor&&topColor.name!=='未填写')out.push(`颜色表现较好的是「${topColor.name}」，销售 ${fmtMoney(topColor.amount)}。`);
+  if(topInv)out.push(`当前库存资金占用最高的品类是「${topInv.name}」，约 ${fmtMoney(topInv.value)}。`);
+  if(slow)out.push(`需要关注「${slow.name}」：库存资金约 ${fmtMoney(slow.value)}，${slow.days>=9999?'暂无销售记录':`${slow.days}天未成交`}。`);
+  if(a.colorCompletion<.8)out.push(`颜色字段完整度只有 ${(a.colorCompletion*100).toFixed(0)}%，补齐颜色后颜色趋势会更可靠。`);
+  return out;
+}
+function operatingAssistantAnswer(question,a){
+  const q=String(question||'').trim();if(!q)return '可以问：旺季淡季、什么品类卖得好、什么颜色卖得好、哪些库存占钱、客户贡献、最近利润怎么样。';
+  if(/旺季|淡季|月份|季节/.test(q)){
+    if(!a.seasonality.length)return '目前完整历史月份不足，等2024、2025等历史销售导入后，旺淡季判断会更可靠。';
+    const top=a.seasonality.slice(0,3),bottom=[...a.seasonality].sort((x,y)=>x.avgRevenue-y.avgRevenue).slice(0,3);
+    return `按已导入的完整月份平均销售额看，旺季偏向 ${top.map(x=>`${analyticsMonthName(x.month)}（均 ${fmtMoney(x.avgRevenue)}）`).join('、')}；相对淡季是 ${bottom.map(x=>`${analyticsMonthName(x.month)}（均 ${fmtMoney(x.avgRevenue)}）`).join('、')}。建议至少导入2个完整年度后再据此制定年度备货预算。`;
+  }
+  if(/品类|分类|什么货|卖得好/.test(q)){
+    const list=(a.recentCategories.length?a.recentCategories:a.categories).slice(0,5);if(!list.length)return '当前没有可用于品类分析的销售数据。';
+    return `按${a.recentCategories.length?'近90天':'全部历史'}销售额，前五品类是：${list.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。建议优先结合毛利率与库存资金占用决定补货，不只看销量。`;
+  }
+  if(/颜色|色系|白玉|碧玉|绿色/.test(q)){
+    const list=(a.recentColors.length?a.recentColors:a.colors).filter(x=>x.name!=='未填写').slice(0,5);if(!list.length)return `当前颜色字段不足，商品颜色完整度 ${(a.colorCompletion*100).toFixed(0)}%。先补齐颜色标签后再判断会更准确。`;
+    return `按${a.recentColors.length?'近90天':'全部历史'}销售额，颜色前五是：${list.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)} / ${fmtInt(x.qty)}件`).join('；')}。目前颜色字段完整度 ${(a.colorCompletion*100).toFixed(0)}%。`;
+  }
+  if(/库存|压货|滞销|卖不动|资金占用/.test(q)){
+    const cats=a.inventoryCategories.slice(0,4),slow=a.slowProducts.slice(0,4);return `当前库存成本约 ${fmtMoney(a.inventoryValue)}。资金占用最高品类：${cats.map(x=>`${x.name} ${fmtMoney(x.value)}`).join('、')||'暂无'}。90天以上未成交且占资较高的商品：${slow.map(x=>`${x.name} ${fmtMoney(x.value)}`).join('、')||'暂无明显项'}。`;
+  }
+  if(/客户|谁拿货|贡献|大客户/.test(q)){
+    const top=a.customersRank.slice(0,5),total=a.customersRank.reduce((s,x)=>s+x.amount,0),top5=top.reduce((s,x)=>s+x.amount,0);return `历史成交客户 ${a.customersRank.length} 位。前五客户：${top.map((x,i)=>`${i+1}.${x.name} ${fmtMoney(x.amount)}`).join('；')||'暂无'}。前五客户贡献约 ${total?((top5/total)*100).toFixed(1):0}%，可用来判断客户集中度。`;
+  }
+  if(/利润|毛利|赚|盈利/.test(q)){
+    const margin=a.recentRevenue?a.recentProfit/a.recentRevenue:0;return `近30天销售 ${fmtMoney(a.recentRevenue)}，成本 ${fmtMoney(a.recentCost)}，毛利润 ${fmtMoney(a.recentProfit)}，毛利率 ${(margin*100).toFixed(1)}%；销售额较前30天 ${analyticsChangeText(a.recentRevenue,a.prevRevenue)}。`;
+  }
+  return operatingAssistantInsights(a).join(' ');
+}
+function assistantRankingRows(list,mode='sales',limit=6){return (list||[]).slice(0,limit).map((x,i)=>`<div class="assistant-rank-row"><span class="assistant-rank-no">${i+1}</span><div class="assistant-rank-main"><strong>${esc(x.name)}</strong><small>${mode==='inventory'?`${fmtInt(x.qty)}件 · ${x.sku||0}个SKU`:`${fmtInt(x.qty)}件${x.margin!==undefined?` · 毛利率 ${(x.margin*100).toFixed(1)}%`:''}`}</small></div><b>${fmtMoney(mode==='inventory'?x.value:x.amount)}</b></div>`).join('')||`<div class="assistant-empty">暂无可分析数据</div>`;}
+function renderOperatingAssistant(host,a){
+  const insights=operatingAssistantInsights(a),topSeason=a.seasonality.slice(0,3),lowSeason=[...a.seasonality].sort((x,y)=>x.avgRevenue-y.avgRevenue).slice(0,3),slow=a.slowProducts.slice(0,5),topCustomer=a.customersRank[0];
+  host.innerHTML=`
+    <div class="assistant-hero"><div><div class="assistant-kicker">漠翠经营助手</div><h3>把账本变成补货和经营判断</h3><p>直接读取本机进销存数据分析，不调用外部 AI，不产生 API 费用。</p></div><span class="badge success">本地分析</span></div>
+    <div class="section-title">本期诊断 <small>自动生成</small></div><div class="assistant-diagnosis">${insights.map(x=>`<p>${esc(x)}</p>`).join('')}</div>
+    <div class="grid-3 assistant-metrics"><div class="metric compact"><div class="label">近30天销售</div><div class="value">${fmtMoney(a.recentRevenue)}</div><div class="hint">${analyticsChangeText(a.recentRevenue,a.prevRevenue)}</div></div><div class="metric compact"><div class="label">近30天毛利</div><div class="value">${fmtMoney(a.recentProfit)}</div><div class="hint">毛利率 ${a.recentRevenue?((a.recentProfit/a.recentRevenue)*100).toFixed(1):0}%</div></div><div class="metric compact"><div class="label">库存资金</div><div class="value">${fmtMoney(a.inventoryValue)}</div><div class="hint">${fmtInt(a.inventoryQty)} 件库存</div></div></div>
+    <div class="section-title">问经营助手 <small>支持自然语言关键词</small></div><div class="assistant-ask"><div class="assistant-ask-row"><input id="assistantQuestion" class="input" placeholder="例如：最近什么品类卖得最好？"><button id="assistantAskBtn" class="btn">分析</button></div><div class="assistant-chips"><button data-q="旺季淡季是什么时候">旺季淡季</button><button data-q="什么品类卖得好">品类</button><button data-q="什么颜色卖得好">颜色</button><button data-q="哪些库存占钱卖不动">库存</button><button data-q="哪些客户贡献最高">客户</button></div><div id="assistantAnswer" class="assistant-answer">${esc(operatingAssistantAnswer('综合分析',a))}</div></div>
+    <div class="section-title">品类销售 <small>${a.recentCategories.length?'近90天':'历史累计'}</small></div><div class="assistant-rank-card">${assistantRankingRows(a.recentCategories.length?a.recentCategories:a.categories)}</div>
+    <div class="section-title">颜色销售 <small>颜色完整度 ${(a.colorCompletion*100).toFixed(0)}%</small></div><div class="assistant-rank-card">${assistantRankingRows((a.recentColors.length?a.recentColors:a.colors).filter(x=>x.name!=='未填写'))}</div>
+    <div class="section-title">旺季 / 淡季 <small>按完整月份平均销售额</small></div><div class="grid-2"><div class="assistant-season-card"><b>历史旺季</b>${topSeason.length?topSeason.map(x=>`<span>${analyticsMonthName(x.month)} <strong>${fmtMoney(x.avgRevenue)}</strong></span>`).join(''):'<span>历史月份不足</span>'}</div><div class="assistant-season-card"><b>相对淡季</b>${lowSeason.length?lowSeason.map(x=>`<span>${analyticsMonthName(x.month)} <strong>${fmtMoney(x.avgRevenue)}</strong></span>`).join(''):'<span>历史月份不足</span>'}</div></div>
+    <div class="section-title">库存资金占用</div><div class="assistant-rank-card">${assistantRankingRows(a.inventoryCategories,'inventory')}</div>
+    <div class="section-title">慢销提醒 <small>90天以上未成交</small></div><div class="assistant-rank-card">${slow.length?slow.map((x,i)=>`<div class="assistant-rank-row"><span class="assistant-rank-no">${i+1}</span><div class="assistant-rank-main"><strong>${esc(x.name)}</strong><small>${esc(x.category)} · ${x.days>=9999?'暂无销售记录':`${x.days}天未成交`} · 库存${fmtInt(x.stock)}</small></div><b>${fmtMoney(x.value)}</b></div>`).join(''):'<div class="assistant-empty">暂无明显慢销占资商品</div>'}</div>
+    <div class="section-title">客户结构</div><div class="assistant-summary-card"><span>客户总数 <strong>${a.customerCount}</strong></span><span>历史成交客户 <strong>${a.customersRank.length}</strong></span><span>第一客户 <strong>${esc(topCustomer?.name||'暂无')}</strong></span><span>未结调借 <strong>${a.openLoans}单 / ${fmtInt(a.loanQty)}件</strong></span></div>`;
+  const input=$('#assistantQuestion'),answer=$('#assistantAnswer');const ask=()=>{answer.textContent=operatingAssistantAnswer(input.value,a);};$('#assistantAskBtn').onclick=ask;input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();ask();}};$$('.assistant-chips button').forEach(b=>b.onclick=()=>{input.value=b.dataset.q;ask();});
+}
+
 async function renderReports(){
-  setHeader('统计报表','经营概况、销售、利润、客户、商品');
-  $('#main').innerHTML=`<div class="segment" id="reportRange"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
+  setHeader('统计报表','经营概况、销售、利润、客户、商品 · 经营助手');
+  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">统计报表</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
   const draw=async(key='30d',s='',e='')=>{
     const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&inRange(x.createdAt,range));
     const revenue=rows.reduce((a,x)=>a+n(x.finalAmount),0), qty=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+n(i.qty),0),0);
@@ -953,6 +1054,9 @@ async function renderReports(){
       <button id="exportSalesReport" class="btn secondary block" style="margin-top:12px">导出当前销售报表 CSV</button>`;
     $('#exportSalesReport').onclick=()=>exportSalesCSV(rows);
   };
+  const showReport=()=>{$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='report'));draw();};
+  const showAssistant=async()=>{$('#reportRange').classList.add('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='assistant'));$('#reportBody').innerHTML='<div class="assistant-loading">正在分析经营数据…</div>';const [sales,products,customers,loans]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),dbAll('loans')]);renderOperatingAssistant($('#reportBody'),buildOperatingAnalytics(sales,products,customers,loans));};
+  $$('#reportMode button').forEach(b=>b.onclick=()=>b.dataset.mode==='assistant'?showAssistant():showReport());
   draw();$$('#reportRange button').forEach(b=>b.onclick=()=>{if(b.dataset.range==='custom'){openDateRangePicker((s,e)=>draw('custom',s,e));return;}$$('#reportRange button').forEach(x=>x.classList.toggle('active',x===b));draw(b.dataset.range);});
 }
 function exportSalesCSV(rows){
