@@ -791,6 +791,54 @@ function bindSaleDraft(customerRows=[]){
   $('#viewSales').onclick=()=>{syncSaleFormToDraft();navigate('sales');};
   $('#saveSale').onclick=saveSale;
 }
+async function saveSale(){
+  syncSaleFormToDraft();
+  const d=appState.saleDraft;
+  const btn=$('#saveSale');
+  if(!d?.items?.length){showToast('请选择商品');return;}
+  if(d.items.some(i=>n(i.qty)<=0)){showToast('商品数量必须大于0');return;}
+  if(btn?.dataset.submitting==='1')return;
+  if(btn){btn.dataset.submitting='1';btn.disabled=true;btn.textContent='正在开单…';}
+  try{
+    await validateStock(d.items,-1);
+    const totals=calcSaleTotals(d),id=uid('sale'),orderNo=await nextOrderNo();
+    const customerName=d.customerName||'散客';
+    let customerId=d.customerId||'';
+    if(customerName!=='散客'&&!customerId){
+      const customers=await dbAll('customers');
+      let c=customers.find(x=>x.name===customerName);
+      if(!c){
+        c={id:uid('cust'),name:customerName,phone:'',note:'销售开单自动创建',createdAt:nowISO(),updatedAt:nowISO()};
+        await dbPut('customers',c);
+      }
+      customerId=c.id;
+    }
+    const createdAt=new Date(d.createdAt).toISOString();
+    for(const i of d.items){
+      await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
+    }
+    const sale={
+      id,orderNo,customerId,customerName,
+      items:d.items.map(i=>({...i,qty:n(i.qty),price:n(i.price),costPrice:n(i.costPrice)})),
+      subtotal:totals.subtotal,
+      discountType:d.discountType,
+      discountValue:n(d.discountValue),
+      discountAmount:totals.discountAmount,
+      finalAmount:totals.finalAmount,
+      received:d.received===''?totals.finalAmount:n(d.received),
+      note:d.note,status:'active',createdAt,cancelledAt:null,updatedAt:nowISO()
+    };
+    await dbPut('sales',sale);
+    await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale);
+    appState.saleDraft=null;
+    showToast(`开单成功：${orderNo}`);
+    navigate('sales',{highlight:id});
+  }catch(err){
+    showToast(err?.message||'开单失败，请重试');
+    if(btn){btn.dataset.submitting='0';btn.disabled=false;btn.textContent='确认开单并扣减库存';}
+  }
+}
+
 async function openProductSelector(selectedIds,callback){
   const [products,categories]=await Promise.all([dbAll('products'),dbAll('categories')]);const selected=new Set(selectedIds),available=products.filter(p=>!p.historicalOnly);let selectedCategoryId='__all__';
   openModal('选择商品',`<div class="toolbar"><div class="search"><input id="selectorSearch" placeholder="名称、编码、颜色"></div><button id="selectorCategoryBtn" class="filter-select category-filter-btn" type="button">全部分类</button></div><div id="selectorList" class="list"></div><div class="sticky-actions"><button id="selectorConfirm" class="btn block">确定选择（${selected.size}）</button></div>`,{full:true,onOpen:()=>{

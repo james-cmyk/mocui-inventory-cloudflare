@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.8.3-ios-pwa-dock-fix';
+const CACHE='mocui-v3.8.4-sale-submit-fix';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.8.3：iOS standalone 改用系统安全 viewport，避免底部系统空白并恢复 Dock 文字
+// v3.8.4：恢复销售开单提交逻辑并增加提交中反馈/防重复点击
