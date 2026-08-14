@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.8.4-sale-submit-fix';
+const CACHE='mocui-v3.9-core-stability';
 const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.8.4：恢复销售开单提交逻辑并增加提交中反馈/防重复点击
+// v3.9：冻结核心交易层；销售/商品/调借/归还/盘点增加防重复与核心自检
