@@ -4,7 +4,7 @@ const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
 const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals'};
+const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans'};
 let db;
 let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, passDealDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
@@ -40,7 +40,9 @@ function coreHandlerStatus(){
     ['库存调整',typeof adjustStock==='function'],['库存校验',typeof validateStock==='function'],
     ['撤销销售',typeof cancelSale==='function'],['恢复销售',typeof restoreSale==='function'],
     ['过手差价',typeof savePassDeal==='function'],['过手单管理',typeof renderPassDeals==='function'],
-    ['过手库存隔离',typeof savePassDeal==='function'&&!/adjustStock\s*\(|stockMoves|dbPut\(\s*["\']products["\']/.test(savePassDeal.toString())]
+    ['过手库存隔离',typeof savePassDeal==='function'&&!/adjustStock\s*\(|stockMoves|dbPut\(\s*["\']products["\']/.test(savePassDeal.toString())],
+    ['外部货流转',typeof renderExternalGoods==='function'&&typeof saveExternalGood==='function'],
+    ['外部货库存隔离',typeof saveExternalGood==='function'&&typeof openExternalSale==='function'&&!/adjustStock\s*\(|stockMoves|dbPut\(\s*["\']products["\']/.test([saveExternalGood,openExternalSale,openExternalTransfer,externalBackToStore,externalReturnToOwner].map(fn=>fn.toString()).join('\n'))]
   ];
   return checks.filter(([,ok])=>!ok).map(([name])=>name);
 }
@@ -319,6 +321,28 @@ function dateRange(key, customStart, customEnd){
   return {start,end};
 }
 function inRange(date,{start,end}){ const t=new Date(date).getTime(); return t>=start.getTime()&&t<=end.getTime(); }
+function localDateKey(value=new Date()){
+  const d=value instanceof Date?value:new Date(value);if(Number.isNaN(d.getTime()))return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function orderNoDateKey(orderNo=''){
+  const m=String(orderNo||'').match(/^XS(\d{4})(\d{2})(\d{2})/);return m?`${m[1]}-${m[2]}-${m[3]}`:'';
+}
+function recordBusinessDateKey(row,kind='generic'){
+  const explicit=String(row?.businessDate||'').slice(0,10);if(/^\d{4}-\d{2}-\d{2}$/.test(explicit))return explicit;
+  // v3.10.1 前的本地销售没有 businessDate。若订单号日期与最后保存日期一致，优先按业务单号日期修复一次旧记录的时区/同步偏差。
+  if(kind==='sale'&&!saleIsHistorical(row)){
+    const orderKey=orderNoDateKey(row?.orderNo),updatedKey=localDateKey(row?.updatedAt);
+    if(orderKey&&updatedKey===orderKey)return orderKey;
+  }
+  return localDateKey(row?.createdAt||row?.date||row?.updatedAt);
+}
+function businessDateAsLocalNoon(row,kind='generic'){
+  const key=recordBusinessDateKey(row,kind);if(!key)return new Date(NaN);const [y,m,d]=key.split('-').map(Number);return new Date(y,m-1,d,12,0,0,0);
+}
+function recordInBusinessRange(row,range,kind='generic'){
+  const d=businessDateAsLocalNoon(row,kind);return !Number.isNaN(d.getTime())&&d.getTime()>=range.start.getTime()&&d.getTime()<=range.end.getTime();
+}
 function calcSaleTotals(draft){
   const subtotal=(draft.items||[]).reduce((s,i)=>s+n(i.qty)*n(i.price),0);
   let discountAmount=0;
@@ -611,7 +635,7 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
-    'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew,
+    'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew, 'external-goods':renderExternalGoods,
     more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
@@ -622,20 +646,22 @@ async function renderDashboard(){
   const [products,sales,loans,passDeals]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals()]);
   const activeSales=sales.filter(saleIsReportActive);
   const today=dateRange('today'), monthStart=new Date(new Date().getFullYear(),new Date().getMonth(),1);
-  const todaySales=activeSales.filter(s=>inRange(s.createdAt,today));
-  const monthSales=activeSales.filter(s=>new Date(s.createdAt)>=monthStart);
+  const todaySales=activeSales.filter(s=>recordInBusinessRange(s,today,'sale'));
+  const monthRange={start:monthStart,end:endOfDay(new Date())};
+  const monthSales=activeSales.filter(s=>recordInBusinessRange(s,monthRange,'sale'));
   const catalogProducts=products.filter(p=>!p.historicalOnly);
   const inventoryQty=catalogProducts.reduce((s,p)=>s+n(p.stock),0);
   const inventoryCost=catalogProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   const sumAmount=rows=>rows.reduce((s,r)=>s+n(r.finalAmount),0);
   const profit=rows=>rows.reduce((s,r)=>s+saleGrossProfit(r),0);
-  const activePassDeals=passDeals.filter(passDealIsActive),todayPassDeals=activePassDeals.filter(d=>inRange(d.createdAt,today));
+  const activePassDeals=passDeals.filter(passDealIsActive),todayPassDeals=activePassDeals.filter(d=>recordInBusinessRange(d,today,'pass'));
+  const todayPassTurnover=todayPassDeals.reduce((a,d)=>a+n(d.saleAmount),0),todayPassProfit=todayPassDeals.reduce((a,d)=>a+passDealProfit(d),0);
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
   $('#main').innerHTML=`
     <div class="grid-2">
-      <div class="metric"><div class="label">今日销售额</div><div class="value money">${fmtMoney(sumAmount(todaySales))}</div><div class="hint">${todaySales.length} 笔销售</div></div>
-      <div class="metric"><div class="label">今日毛利润</div><div class="value money">${fmtMoney(profit(todaySales))}</div><div class="hint">按商品成本估算</div></div>
+      <div class="metric"><div class="label">今日销售额</div><div class="value money">${fmtMoney(sumAmount(todaySales))}</div><div class="hint">${todaySales.length} 笔正式/调借销售 · 过手另计 ${fmtMoney(todayPassTurnover)}</div></div>
+      <div class="metric"><div class="label">今日毛利润</div><div class="value money">${fmtMoney(profit(todaySales))}</div><div class="hint">销售毛利 · 过手利润 ${fmtMoney(todayPassProfit)} · 经营毛利 ${fmtMoney(profit(todaySales)+todayPassProfit)}</div></div>
       <div class="metric"><div class="label">本月销售额</div><div class="value money">${fmtMoney(sumAmount(monthSales))}</div><div class="hint">${monthSales.length} 笔销售</div></div>
       <div class="metric"><div class="label">本月毛利润</div><div class="value money">${fmtMoney(profit(monthSales))}</div><div class="hint">已扣订单优惠</div></div>
     </div>
@@ -777,7 +803,7 @@ async function renderProductDetail(){
     <div class="section-title">库存流水 <small>最近20条</small></div>
     <div class="timeline">${moves.filter(m=>m.productId===p.id).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,20).map(m=>`<div class="timeline-item"><div class="time">${fmtDateTime(m.createdAt)}</div><div class="text">${esc(moveTypeName(m.type))}　<strong class="${m.qtyChange>=0?'success-text':'danger-text'}">${m.qtyChange>=0?'+':''}${fmtInt(m.qtyChange)}</strong>　${fmtInt(m.beforeStock)} → ${fmtInt(m.afterStock)}</div><div class="item-meta">${esc(m.note||'')}</div></div>`).join('')||emptyState('▥','暂无库存流水')}</div>`;
   const drawSales=(key='30d',customStart='',customEnd='')=>{
-    const range=dateRange(key,customStart,customEnd), rows=productSales.filter(s=>inRange(s.createdAt,range));
+    const range=dateRange(key,customStart,customEnd), rows=productSales.filter(s=>recordInBusinessRange(s,range,'sale'));
     const lines=[]; rows.forEach(s=>s.items.filter(i=>i.productId===p.id).forEach(i=>lines.push({...i,order:s})));
     const qty=lines.reduce((x,i)=>x+n(i.qty),0), amount=lines.reduce((x,i)=>x+n(i.price)*n(i.qty),0);
     const customerMap={}; lines.forEach(i=>{const name=i.order.customerName||'散客';customerMap[name]=(customerMap[name]||0)+n(i.qty);});
@@ -883,6 +909,7 @@ async function saveSale(){
       }
       customerId=c.id;
     }
+    const businessDate=String(d.createdAt||'').slice(0,10)||localDateKey();
     const createdAt=new Date(d.createdAt).toISOString();
     for(const i of d.items){
       await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
@@ -896,7 +923,7 @@ async function saveSale(){
       discountAmount:totals.discountAmount,
       finalAmount:totals.finalAmount,
       received:d.received===''?totals.finalAmount:n(d.received),
-      note:d.note,status:'active',coreVersion:1,createdAt,cancelledAt:null,updatedAt:nowISO()
+      note:d.note,status:'active',coreVersion:1,businessDate,createdAt,cancelledAt:null,updatedAt:nowISO()
     };
     await dbPut('sales',sale);
     await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale);
@@ -985,7 +1012,8 @@ async function renderLoans(){
   setHeader('调借货管理','连续借货、多次归还、每次图片留底',{label:'＋',onClick:()=>openLoanForm()});
   const loans=(await dbAll('loans')).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const openRows=loans.filter(loanIsOpen);
-  $('#main').innerHTML=`<div class="grid-3"><div class="metric compact"><div class="label">未处理单</div><div class="value">${openRows.length}</div></div><div class="metric compact"><div class="label">部分处理</div><div class="value">${openRows.filter(loanIsPartial).length}</div></div><div class="metric compact"><div class="label">已超期</div><div class="value danger-text">${openRows.filter(l=>loanOverdueDays(l)>0).length}</div></div></div><div class="segment" id="loanStatus" style="margin-top:12px"><button class="active" data-status="all">全部</button><button data-status="active">未处理</button><button data-status="partial">部分处理</button><button data-status="returned">已完成</button><button data-status="overdue">超期</button></div><div id="loanList" class="list"></div>`;
+  $('#main').innerHTML=`<div class="notice"><strong>调借分两套：</strong>下面继续管理已经进入正式商品库的自有库存调借；别人临时放你这里、再调给第三方的货，请用“外部同行货”，不会进入自有库存。</div><button id="openExternalGoods" class="btn secondary block" style="margin-bottom:12px">外部同行货 / 寄售流转（测试）</button><div class="grid-3"><div class="metric compact"><div class="label">未处理单</div><div class="value">${openRows.length}</div></div><div class="metric compact"><div class="label">部分处理</div><div class="value">${openRows.filter(loanIsPartial).length}</div></div><div class="metric compact"><div class="label">已超期</div><div class="value danger-text">${openRows.filter(l=>loanOverdueDays(l)>0).length}</div></div></div><div class="segment" id="loanStatus" style="margin-top:12px"><button class="active" data-status="all">全部</button><button data-status="active">未处理</button><button data-status="partial">部分处理</button><button data-status="returned">已完成</button><button data-status="overdue">超期</button></div><div id="loanList" class="list"></div>`;
+  $('#openExternalGoods').onclick=()=>navigate('external-goods');
   let status='all'; const draw=()=>{const rows=loans.filter(l=>status==='all'||(status==='active'?loanIsOpen(l):status==='partial'?loanIsPartial(l):status==='returned'?!loanIsOpen(l):status==='overdue'?loanOverdueDays(l)>0:false));$('#loanList').innerHTML=rows.length?rows.map(loanListItem).join(''):emptyState('⇄','暂无调借记录');$$('[data-loan-id]').forEach(el=>el.onclick=()=>openLoanDetail(el.dataset.loanId));};draw();$$('#loanStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#loanStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
 }
 async function openLoanForm(){
@@ -1018,7 +1046,7 @@ async function renderLoanFormModal(){
   }).join(''):emptyState('⇄','未选择商品','点击“选择调借商品”添加');
   openModal('新增调借货',`<form id="loanForm" autocomplete="off">
     <div class="loan-step-card"><div class="loan-step-title"><span>1</span> 调借基本信息</div>
-      <div class="form-group"><label class="form-label">调借类型</label><div class="loan-type-switch"><button type="button" data-loan-type="lend" class="${d.type==='lend'?'active':''}">借出 · 库存减少</button><button type="button" data-loan-type="borrow" class="${d.type==='borrow'?'active':''}">调入/借入 · 库存增加</button></div><input id="loanType" type="hidden" value="${esc(d.type)}"></div>
+      <div class="form-group"><label class="form-label">调借类型</label><div class="loan-type-switch"><button type="button" data-loan-type="lend" class="${d.type==='lend'?'active':''}">自有库存借出 · 库存减少</button><button type="button" data-loan-type="borrow" class="${d.type==='borrow'?'active':''}">正式调入库存 · 库存增加</button></div><input id="loanType" type="hidden" value="${esc(d.type)}"><div class="field-help">别人临时寄放/代卖、并不属于你的货，不要选“正式调入库存”，请使用“外部同行货”。</div></div>
       <div class="form-group autocomplete"><label class="form-label">调借人姓名 *</label><input id="loanPerson" class="input" value="${esc(d.person)}" placeholder="输入一个字自动匹配历史借调人" required><div id="loanPersonSuggestions" class="autocomplete-list hidden"></div><div class="field-help">选择历史姓名后，会直接显示这个人所有尚未归还或售出的记录。</div></div>
       <div id="loanPersonOutstanding"></div>
       <div class="form-row"><div class="form-group"><label class="form-label">调借日期和时间</label><input id="loanDate" class="input" type="datetime-local" value="${esc(d.date)}"><div class="field-help">可以补录以前记录。</div></div><div class="form-group"><label class="form-label">预计归还日期</label><input id="loanExpectedReturnDate" class="input" type="date" value="${esc(d.expectedReturnDate||addDaysLocal(d.date||nowISO(),30))}"><div class="field-help">首页会在到期前7天提醒。</div></div></div>
@@ -1113,7 +1141,7 @@ async function openLoanSaleForm(loanId,productId){
       const saleId=draft.__saleId,eventId=draft.__eventId,orderNo=draft.__orderNo,createdAt=new Date(draft.date).toISOString();const totals=calcSaleTotals({items:[{qty:draft.qty,price:draft.price}],discountType:draft.discountType,discountValue:draft.discountValue});
       if(currentLoan.type==='borrow')await adjustStock(productId,-draft.qty,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt);else await recordStockReference(productId,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}；借出时库存已扣减，本次不重复扣减`,createdAt);
       const saleItem={productId:p.id,productName:p.name,productCode:p.code,color:currentItem.color||p.color,qty:draft.qty,price:draft.price,costPrice:n(currentItem.costPrice||p.costPrice),image:currentItem.image||p.image,stock:n(p.stock),productNote:currentItem.productNote||p.note||'',itemNote:draft.itemNote,fromLoan:true,loanId:currentLoan.id,loanNo:currentLoan.loanNo,loanPerson:currentLoan.person,loanType:currentLoan.type,loanSaleEventId:eventId};
-      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);await writeAudit('sale.loan_create','sale',sale.id,`${orderNo} · 来源 ${currentLoan.loanNo}`,null,sale);
+      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,businessDate:String(draft.date||'').slice(0,10)||localDateKey(createdAt),createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);await writeAudit('sale.loan_create','sale',sale.id,`${orderNo} · 来源 ${currentLoan.loanNo}`,null,sale);
       const loanSaleEventExists=(currentLoan.saleEvents||[]).some(e=>e.id===eventId||e.saleId===saleId);if(!loanSaleEventExists){currentLoan.items=(currentLoan.items||[]).map(x=>x.productId===productId?{...x,soldQty:loanItemSoldQty(currentLoan,x)+draft.qty}:x);currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,itemNote:draft.itemNote,status:'active',items:[{productId:p.id,productName:p.name,productCode:p.code,color:saleItem.color,qty:draft.qty,price:draft.price}],createdAt:nowISO()}];}refreshLoanStatus(currentLoan);await dbPut('loans',currentLoan);await writeAudit('loan.sale','loan',currentLoan.id,`${currentLoan.loanNo} 售出 ${p.name} × ${fmtInt(draft.qty)}`,null,{saleId,orderNo,productId,qty:draft.qty});
       closeModal();showToast(`已售出并生成销售单 ${orderNo}`);await openLoanDetail(currentLoan.id);
     }catch(err){showToast(err.message);if(submitBtn&&document.body.contains(submitBtn))setCoreButtonBusy(submitBtn,false,'','确认售出并生成销售单');}};
@@ -1267,7 +1295,7 @@ async function savePassDeal(btn){
     saveLocalDraft(PASS_DEAL_PENDING_KEY,{...d});
     const existing=await getPassDeal(d.__corePassDealId);
     if(existing){clearLocalDraft(PASS_DEAL_PENDING_KEY);appState.passDealDraft=null;showToast(`过手单已存在：${existing.dealNo}`);navigate('pass-deals',{highlight:existing.id});return;}
-    const row={id:d.__corePassDealId,dealNo:d.__corePassDealNo,itemName:d.itemName,qty:Math.max(.01,n(d.qty)||1),sourceName:d.sourceName,buyerName:d.buyerName,costAmount:cost,saleAmount:sale,receivedAmount:d.receivedAmount===''?sale:Math.max(0,n(d.receivedAmount)),sourcePaidAmount:d.sourcePaidAmount===''?cost:Math.max(0,n(d.sourcePaidAmount)),note:d.note||'',image:d.image||'',status:'active',sourceType:'pass_deal',stockApplied:false,createdAt:d.createdAt?new Date(d.createdAt).toISOString():nowISO(),updatedAt:nowISO(),coreVersion:1};
+    const row={id:d.__corePassDealId,dealNo:d.__corePassDealNo,itemName:d.itemName,qty:Math.max(.01,n(d.qty)||1),sourceName:d.sourceName,buyerName:d.buyerName,costAmount:cost,saleAmount:sale,receivedAmount:d.receivedAmount===''?sale:Math.max(0,n(d.receivedAmount)),sourcePaidAmount:d.sourcePaidAmount===''?cost:Math.max(0,n(d.sourcePaidAmount)),note:d.note||'',image:d.image||'',status:'active',sourceType:'pass_deal',stockApplied:false,businessDate:String(d.createdAt||'').slice(0,10)||localDateKey(),createdAt:d.createdAt?new Date(d.createdAt).toISOString():nowISO(),updatedAt:nowISO(),coreVersion:1};
     await putPassDeal(row);
     await writeAudit('passdeal.create','passDeal',row.id,`${row.dealNo} · ${row.sourceName} → ${row.buyerName} · 利润 ${fmtMoney(passDealProfit(row))}`,null,row);
     clearLocalDraft(PASS_DEAL_PENDING_KEY);appState.passDealDraft=null;
@@ -1303,7 +1331,7 @@ async function restorePassDeal(id){
   row.status='active';row.cancelledAt=null;row.updatedAt=nowISO();await putPassDeal(row);
   await writeAudit('passdeal.restore','passDeal',row.id,`${row.dealNo} 已恢复`,null,{status:row.status});showToast('过手单已恢复');renderPassDeals();
 }
-function passDealRowsForRange(rows,range){return (rows||[]).filter(r=>passDealIsActive(r)&&inRange(r.createdAt,range));}
+function passDealRowsForRange(rows,range){return (rows||[]).filter(r=>passDealIsActive(r)&&recordInBusinessRange(r,range,'pass'));}
 function exportPassDealsCSV(rows){
   const head=['过手单号','时间','货品','数量','货主/来源','买家','成本','成交额','差价利润','实收','买家未收','已付货主','货主未付','备注','状态'];
   const out=rows.map(r=>[r.dealNo,fmtDateTime(r.createdAt),r.itemName,r.qty,r.sourceName,r.buyerName,r.costAmount,r.saleAmount,passDealProfit(r),r.receivedAmount,passDealBuyerDue(r),r.sourcePaidAmount,passDealSourceDue(r),r.note,passDealIsActive(r)?'有效':'已作废']);
@@ -1316,7 +1344,7 @@ function analyticsChange(curr,prev){if(!prev)return curr?null:0;return ((curr-pr
 function analyticsChangeText(curr,prev){const rate=analyticsChange(curr,prev);if(rate===null)return '上期无可比数据';if(Math.abs(rate)<.05)return '与上期基本持平';return `${rate>0?'↑':'↓'} ${Math.abs(rate).toFixed(1)}%`;}
 function analyticsAmountLine(row){return row?`${row.name} · ${fmtMoney(row.amount)} · ${fmtInt(row.qty)}件`:'暂无数据';}
 function analyticsTop(list){return Array.isArray(list)&&list.length?list[0]:null;}
-function analyticsPeriodRows(sales,start,end){return sales.filter(x=>saleIsReportActive(x)&&new Date(x.createdAt)>=start&&new Date(x.createdAt)<end);}
+function analyticsPeriodRows(sales,start,end){return sales.filter(x=>{if(!saleIsReportActive(x))return false;const d=businessDateAsLocalNoon(x,'sale');return d>=start&&d<end;});}
 function analyticsRevenue(rows){return rows.reduce((sum,s)=>sum+n(s.finalAmount),0);}
 function analyticsCost(rows){return rows.reduce((sum,s)=>sum+saleCostTotal(s),0);}
 function analyticsQty(rows){return rows.reduce((sum,s)=>sum+(s.items||[]).reduce((a,i)=>a+n(i.qty),0),0);}
@@ -1326,7 +1354,7 @@ function buildOperatingAnalytics(sales,products,customers,loans){
   const recent30=analyticsPeriodRows(activeSales,d30,new Date(now.getTime()+1000)),prev30=analyticsPeriodRows(activeSales,d60,d30),recent90=analyticsPeriodRows(activeSales,d90,new Date(now.getTime()+1000));
   const recentRevenue=analyticsRevenue(recent30),prevRevenue=analyticsRevenue(prev30),recentCost=analyticsCost(recent30),recentProfit=recentRevenue-recentCost;
   const monthMap=new Map();
-  activeSales.forEach(s=>{const key=analyticsMonthKey(s.createdAt);if(!key)return;let r=monthMap.get(key);if(!r){r={key,revenue:0,cost:0,profit:0,orders:0,qty:0};monthMap.set(key,r);}r.revenue+=n(s.finalAmount);r.cost+=saleCostTotal(s);r.profit=r.revenue-r.cost;r.orders++;r.qty+=(s.items||[]).reduce((a,i)=>a+n(i.qty),0);});
+  activeSales.forEach(s=>{const key=analyticsMonthKey(businessDateAsLocalNoon(s,'sale'));if(!key)return;let r=monthMap.get(key);if(!r){r={key,revenue:0,cost:0,profit:0,orders:0,qty:0};monthMap.set(key,r);}r.revenue+=n(s.finalAmount);r.cost+=saleCostTotal(s);r.profit=r.revenue-r.cost;r.orders++;r.qty+=(s.items||[]).reduce((a,i)=>a+n(i.qty),0);});
   const months=[...monthMap.values()].sort((a,b)=>a.key.localeCompare(b.key));
   const currentMonth=analyticsMonthKey(now),completeMonths=months.filter(x=>x.key!==currentMonth);
   const seasonMap=new Map();completeMonths.forEach(r=>{const m=n(r.key.split('-')[1]);let x=seasonMap.get(m);if(!x){x={month:m,revenue:0,profit:0,orders:0,years:0};seasonMap.set(m,x);}x.revenue+=r.revenue;x.profit+=r.profit;x.orders+=r.orders;x.years++;});
@@ -1412,11 +1440,55 @@ function renderOperatingAssistant(host,a){
   const input=$('#assistantQuestion'),answer=$('#assistantAnswer');const ask=()=>{answer.textContent=operatingAssistantAnswer(input.value,a);};$('#assistantAskBtn').onclick=ask;input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();ask();}};$$('.assistant-chips button').forEach(b=>b.onclick=()=>{input.value=b.dataset.q;ask();});
 }
 
+// External-owned / consignment goods test ledger.
+// Deliberately isolated from products, stockMoves and formal inventory valuation.
+const EXTERNAL_GOODS_LEDGER_KEY='externalGoodsLedgerV1';
+async function getExternalGoodsLedger(){return (await dbGet('settings',EXTERNAL_GOODS_LEDGER_KEY))||{id:EXTERNAL_GOODS_LEDGER_KEY,version:1,rows:[],updatedAt:''};}
+async function getExternalGoods(){return (await getExternalGoodsLedger()).rows||[];}
+async function getExternalGood(id){return (await getExternalGoods()).find(x=>x.id===id)||null;}
+async function putExternalGood(row){const ledger=await getExternalGoodsLedger(),idx=ledger.rows.findIndex(x=>x.id===row.id);if(idx>=0)ledger.rows[idx]=row;else ledger.rows.push(row);ledger.updatedAt=nowISO();await dbPut('settings',ledger);return row;}
+function externalStatusName(row){return row?.status==='held'?'在我这里':row?.status==='out'?'已调给同行':row?.status==='sold'?'已售结算':row?.status==='returned'?'已归还货主':'未知';}
+function externalStatusBadge(row){return row?.status==='sold'||row?.status==='returned'?'success':row?.status==='out'?'warn':'partial';}
+function externalProfit(row){return row?.status==='sold'?n(row.saleAmount)-n(row.ownerCostAmount):0;}
+function externalBuyerDue(row){return row?.status==='sold'?Math.max(0,n(row.saleAmount)-n(row.receivedAmount)):0;}
+function externalOwnerDue(row){return row?.status==='sold'?Math.max(0,n(row.ownerCostAmount)-n(row.ownerPaidAmount)):Math.max(0,n(row.ownerCostAmount));}
+async function nextExternalNo(){const rows=await getExternalGoods(),d=new Date(),ymd=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`,prefix=`WH${ymd}`,max=rows.reduce((m,r)=>String(r.tempNo||'').startsWith(prefix)?Math.max(m,n(String(r.tempNo).slice(prefix.length))):m,0);return `${prefix}${String(max+1).padStart(4,'0')}`;}
+async function saveExternalGood(btn,draft){
+  return withCoreActionLock('external-good-new',btn,'正在保存…',async()=>{
+    if(!draft.itemName||!draft.ownerName)throw new Error('请填写货品和货主');
+    const row={id:uid('external'),tempNo:await nextExternalNo(),itemName:draft.itemName.trim(),qty:Math.max(.01,n(draft.qty)||1),ownerName:draft.ownerName.trim(),ownerCostAmount:Math.max(0,n(draft.ownerCostAmount)),note:draft.note||'',image:draft.image||'',status:'held',currentHolderName:'本店',stockApplied:false,businessDate:String(draft.date||'').slice(0,10)||localDateKey(),createdAt:draft.date?new Date(draft.date).toISOString():nowISO(),updatedAt:nowISO(),events:[]};
+    await putExternalGood(row);await writeAudit('external.intake','externalGood',row.id,`${row.tempNo} · ${row.ownerName} · ${row.itemName}`,null,row);showToast('外部货已登记，不计入自有库存');closeModal();renderExternalGoods();
+  }).catch(err=>showToast(err?.message||'保存失败'));
+}
+async function openExternalGoodForm(){
+  const d={date:localInputDateTime(),itemName:'',qty:1,ownerName:'',ownerCostAmount:'',note:'',image:''};
+  openModal('登记外部同行货',`<form id="externalGoodForm"><div class="notice warn"><strong>只用于别人的货。</strong> 登记后不会增加商品库存，也不会进入自有库存成本。以后可以“调给别人 / 售出 / 归还货主”。</div><div class="form-group"><label class="form-label">货品描述 *</label><input id="externalItem" class="input" placeholder="如：白玉手镯 56圈" required></div><div class="form-row"><div class="form-group"><label class="form-label">数量</label><input id="externalQty" class="input" type="number" min="0.01" step="0.01" value="1"></div><div class="form-group"><label class="form-label">拿入时间</label><input id="externalDate" class="input" type="datetime-local" value="${d.date}"></div></div><div class="form-group"><label class="form-label">真实货主 *</label><input id="externalOwner" class="input" placeholder="谁的货" required></div><div class="form-group"><label class="form-label">货主结算价 / 责任底价（总额）</label><input id="externalCost" class="input" type="number" min="0" step="0.01" placeholder="卖掉后要给货主多少钱"></div><div class="form-group"><label class="form-label">照片（可选）</label><label class="btn secondary" for="externalImage">选择照片</label><input id="externalImage" class="hidden" type="file" accept="image/*"><div id="externalImagePreview" style="margin-top:8px"></div></div><div class="form-group"><label class="form-label">备注</label><textarea id="externalNote" class="textarea" placeholder="来源、瑕疵、约定等"></textarea></div><button id="saveExternalGoodBtn" class="btn block" type="submit">确认登记外部货</button></form>`,{full:true,onOpen:()=>{
+    $('#externalImage').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;d.image=await compressImage(f,1000,.72);$('#externalImagePreview').innerHTML=`<img class="thumb" style="width:72px;height:72px" src="${esc(d.image)}" alt="">`;e.target.value='';};
+    $('#externalGoodForm').onsubmit=async e=>{e.preventDefault();Object.assign(d,{itemName:$('#externalItem').value,qty:$('#externalQty').value,date:$('#externalDate').value,ownerName:$('#externalOwner').value,ownerCostAmount:$('#externalCost').value,note:$('#externalNote').value});await saveExternalGood($('#saveExternalGoodBtn'),d);};
+  }});
+}
+function externalGoodCard(r){const loc=r.status==='out'?`当前在 ${esc(r.currentHolderName||'同行')}`:r.status==='held'?'当前在本店':externalStatusName(r);return `<div class="card external-good-card" data-id="${r.id}"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="item-title">${esc(r.itemName)} · ${esc(r.tempNo)}</div><div class="item-meta">货主 ${esc(r.ownerName)} · ${fmtInt(r.qty)}件 · ${loc}</div></div><div class="item-right"><strong>${r.status==='sold'?fmtMoney(externalProfit(r)):fmtMoney(r.ownerCostAmount)}</strong><span class="badge ${externalStatusBadge(r)}">${externalStatusName(r)}</span></div></div><div class="item-meta" style="margin-top:8px">货主底价 ${fmtMoney(r.ownerCostAmount)}${r.expectedReturnDate?` · 预计 ${fmtDate(r.expectedReturnDate)} 前处理`:''}${r.status==='sold'?` · 成交 ${fmtMoney(r.saleAmount)} · 利润 ${fmtMoney(externalProfit(r))}`:''}</div></div>`;}
+async function renderExternalGoods(){
+  setHeader('外部同行货','别人的货 · 在手 / 调出 / 售出 / 归还',{label:'＋',onClick:openExternalGoodForm});
+  const rows=(await getExternalGoods()).sort((a,b)=>new Date(b.updatedAt||b.createdAt)-new Date(a.updatedAt||a.createdAt)),open=rows.filter(r=>r.status==='held'||r.status==='out'),held=open.filter(r=>r.status==='held'),out=open.filter(r=>r.status==='out');
+  $('#main').innerHTML=`<div class="notice"><strong>外部货不属于你的库存。</strong> 在这里登记后，系统只追踪“谁的货、现在在哪里、卖没卖、应付货主多少”，不会增加/扣减正式商品库存。</div><div class="grid-3"><div class="metric compact"><div class="label">在我这里</div><div class="value">${held.length}</div></div><div class="metric compact"><div class="label">调给同行</div><div class="value">${out.length}</div></div><div class="metric compact"><div class="label">未结货值</div><div class="value">${fmtMoney(open.reduce((a,r)=>a+n(r.ownerCostAmount),0))}</div></div></div><div class="segment" id="externalStatus" style="margin-top:12px"><button class="active" data-status="open">未处理</button><button data-status="held">在我这里</button><button data-status="out">调给同行</button><button data-status="sold">已售</button><button data-status="returned">已归还</button><button data-status="all">全部</button></div><div id="externalList" class="list"></div>`;
+  let status='open';const draw=()=>{const filtered=rows.filter(r=>status==='all'||status==='open'?(r.status==='held'||r.status==='out'):r.status===status);$('#externalList').innerHTML=filtered.length?filtered.map(externalGoodCard).join(''):emptyState('◇','暂无外部货记录','点右上角＋登记一件别人的货');$$('.external-good-card').forEach(el=>el.onclick=()=>openExternalGoodDetail(el.dataset.id));};draw();$$('#externalStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#externalStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
+}
+async function openExternalGoodDetail(id){
+  const r=await getExternalGood(id);if(!r)return;const actions=r.status==='held'?`<div class="grid-2"><button id="externalTransfer" class="btn secondary">调给别人</button><button id="externalSell" class="btn">我直接卖出</button></div><button id="externalReturnOwner" class="btn ghost block" style="margin-top:8px">归还货主</button>`:r.status==='out'?`<div class="grid-2"><button id="externalSoldByDealer" class="btn">对方卖掉 / 结算</button><button id="externalBack" class="btn secondary">退回我这里</button></div><button id="externalReturnOwner" class="btn ghost block" style="margin-top:8px">直接归还货主</button>`:'';
+  openModal(`${r.itemName} · ${r.tempNo}`,`${r.image?`<img src="${esc(r.image)}" style="display:block;width:100%;max-height:240px;object-fit:contain;border-radius:12px;margin-bottom:10px">`:''}<div class="grid-2"><div class="metric compact"><div class="label">货主</div><div class="value" style="font-size:14px">${esc(r.ownerName)}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:14px">${externalStatusName(r)}</div></div></div><div class="total-box"><div class="total-row"><span>数量 / 货主底价</span><strong>${fmtInt(r.qty)} / ${fmtMoney(r.ownerCostAmount)}</strong></div><div class="total-row"><span>当前位置</span><strong>${esc(r.currentHolderName||'-')}</strong></div>${r.status==='sold'?`<div class="total-row"><span>成交 / 实收</span><strong>${fmtMoney(r.saleAmount)} / ${fmtMoney(r.receivedAmount)}</strong></div><div class="total-row"><span>已付货主 / 未付</span><strong>${fmtMoney(r.ownerPaidAmount)} / ${fmtMoney(externalOwnerDue(r))}</strong></div><div class="total-row grand"><span>外部货利润</span><strong>${fmtMoney(externalProfit(r))}</strong></div>`:''}</div>${actions}<div class="notice" style="margin-top:10px">备注：${esc(r.note||'无')}<br><strong>正式库存影响：0</strong></div>`,{onOpen:()=>{if($('#externalTransfer'))$('#externalTransfer').onclick=()=>openExternalTransfer(r.id);if($('#externalSell'))$('#externalSell').onclick=()=>openExternalSale(r.id,'direct');if($('#externalSoldByDealer'))$('#externalSoldByDealer').onclick=()=>openExternalSale(r.id,'dealer');if($('#externalBack'))$('#externalBack').onclick=()=>externalBackToStore(r.id,$('#externalBack'));if($('#externalReturnOwner'))$('#externalReturnOwner').onclick=()=>externalReturnToOwner(r.id,$('#externalReturnOwner'));}});
+}
+async function openExternalTransfer(id){const r=await getExternalGood(id);if(!r||r.status!=='held')return;openModal('调给同行',`<form id="externalTransferForm"><div class="notice">货主仍是 <strong>${esc(r.ownerName)}</strong>，这里只改变货品当前去向，不改变自有库存。</div><div class="form-group"><label class="form-label">调给谁 *</label><input id="externalHolder" class="input" required></div><div class="form-row"><div class="form-group"><label class="form-label">调出时间</label><input id="externalOutDate" class="input" type="datetime-local" value="${localInputDateTime()}"></div><div class="form-group"><label class="form-label">预计处理/归还日期</label><input id="externalDueDate" class="input" type="date" value="${addDaysLocal(nowISO(),30)}"></div></div><div class="form-group"><label class="form-label">备注</label><textarea id="externalOutNote" class="textarea"></textarea></div><button id="saveExternalTransfer" class="btn block" type="submit">确认调出</button></form>`,{onOpen:()=>{$('#externalTransferForm').onsubmit=async e=>{e.preventDefault();const btn=$('#saveExternalTransfer');await withCoreActionLock(`external-transfer-${id}`,btn,'正在保存…',async()=>{const cur=await getExternalGood(id);if(!cur||cur.status!=='held')return;cur.status='out';cur.currentHolderName=$('#externalHolder').value.trim();if(!cur.currentHolderName)throw new Error('请填写调给谁');cur.expectedReturnDate=$('#externalDueDate').value;cur.updatedAt=nowISO();cur.events=[...(cur.events||[]),{id:uid('ext_evt'),type:'transfer_out',date:new Date($('#externalOutDate').value).toISOString(),holderName:cur.currentHolderName,note:$('#externalOutNote').value||''}];await putExternalGood(cur);await writeAudit('external.transfer','externalGood',cur.id,`${cur.tempNo} → ${cur.currentHolderName}`,null,{status:cur.status,currentHolderName:cur.currentHolderName});closeModal();showToast('已记录调出，正式库存未变化');renderExternalGoods();}).catch(err=>showToast(err?.message||'保存失败'));};}});}
+async function openExternalSale(id,mode='direct'){const r=await getExternalGood(id);if(!r||!['held','out'].includes(r.status))return;const buyerDefault=mode==='dealer'?(r.currentHolderName||''):'';openModal(mode==='dealer'?'对方已售 / 结算':'外部货售出',`<form id="externalSaleForm"><div class="notice">这笔成交归入“外部货销售”，不进入正式商品销量和库存周转。利润按 成交价 - 货主结算价 计算。</div><div class="form-group"><label class="form-label">结算对象 / 买家 *</label><input id="externalBuyer" class="input" value="${esc(buyerDefault)}" required></div><div class="form-group"><label class="form-label">成交时间</label><input id="externalSaleDate" class="input" type="datetime-local" value="${localInputDateTime()}"></div><div class="form-row"><div class="form-group"><label class="form-label">成交价 *</label><input id="externalSaleAmount" class="input" type="number" min="0" step="0.01" required></div><div class="form-group"><label class="form-label">货主结算价</label><input id="externalOwnerCost" class="input" type="number" min="0" step="0.01" value="${n(r.ownerCostAmount)}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">本次实收</label><input id="externalReceived" class="input" type="number" min="0" step="0.01" placeholder="留空=已收全款"></div><div class="form-group"><label class="form-label">已付货主</label><input id="externalOwnerPaid" class="input" type="number" min="0" step="0.01" placeholder="留空=已结清"></div></div><button id="saveExternalSale" class="btn block" type="submit">确认售出并结算</button></form>`,{onOpen:()=>{$('#externalSaleForm').onsubmit=async e=>{e.preventDefault();const btn=$('#saveExternalSale');await withCoreActionLock(`external-sale-${id}`,btn,'正在结算…',async()=>{const cur=await getExternalGood(id);if(!cur||!['held','out'].includes(cur.status))return;const sale=n($('#externalSaleAmount').value),cost=n($('#externalOwnerCost').value),date=$('#externalSaleDate').value,buyer=$('#externalBuyer').value.trim();if(!buyer)throw new Error('请填写买家/结算对象');cur.status='sold';cur.buyerName=buyer;cur.saleAmount=sale;cur.ownerCostAmount=cost;cur.receivedAmount=$('#externalReceived').value===''?sale:n($('#externalReceived').value);cur.ownerPaidAmount=$('#externalOwnerPaid').value===''?cost:n($('#externalOwnerPaid').value);cur.businessDate=String(date||'').slice(0,10)||localDateKey();cur.soldAt=date?new Date(date).toISOString():nowISO();cur.currentHolderName=buyer;cur.updatedAt=nowISO();cur.events=[...(cur.events||[]),{id:uid('ext_evt'),type:'sold',date:cur.soldAt,buyerName:buyer,saleAmount:sale,ownerCostAmount:cost}];await putExternalGood(cur);await writeAudit('external.sale','externalGood',cur.id,`${cur.tempNo} · ${buyer} · 利润 ${fmtMoney(externalProfit(cur))}`,null,{status:cur.status,saleAmount:sale,profit:externalProfit(cur)});closeModal();showToast(`已结算，利润 ${fmtMoney(externalProfit(cur))}`);renderExternalGoods();}).catch(err=>showToast(err?.message||'结算失败'));};}});}
+async function externalBackToStore(id,btn){await withCoreActionLock(`external-back-${id}`,btn,'保存中…',async()=>{const r=await getExternalGood(id);if(!r||r.status!=='out')return;r.status='held';r.currentHolderName='本店';r.expectedReturnDate='';r.updatedAt=nowISO();r.events=[...(r.events||[]),{id:uid('ext_evt'),type:'back_to_store',date:nowISO()}];await putExternalGood(r);await writeAudit('external.back','externalGood',r.id,`${r.tempNo} 退回本店`,null,{status:r.status});closeModal();showToast('已退回本店，正式库存未变化');renderExternalGoods();});}
+async function externalReturnToOwner(id,btn){if(!await confirmDialog('确定这件外部货已经归还原货主？'))return;await withCoreActionLock(`external-return-${id}`,btn,'保存中…',async()=>{const r=await getExternalGood(id);if(!r||!['held','out'].includes(r.status))return;r.status='returned';r.returnedAt=nowISO();r.currentHolderName=r.ownerName;r.expectedReturnDate='';r.updatedAt=nowISO();r.events=[...(r.events||[]),{id:uid('ext_evt'),type:'return_owner',date:r.returnedAt}];await putExternalGood(r);await writeAudit('external.return_owner','externalGood',r.id,`${r.tempNo} 已归还 ${r.ownerName}`,null,{status:r.status});closeModal();showToast('已归还货主');renderExternalGoods();});}
+function externalSoldRowsForRange(rows,range){return (rows||[]).filter(r=>r.status==='sold'&&recordInBusinessRange({businessDate:r.businessDate,createdAt:r.soldAt||r.createdAt},range,'external'));}
+
 async function renderReports(){
   setHeader('统计报表','销售、过手差价、利润、客户、商品 · 经营助手');
-  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">销售报表</button><button data-mode="pass">过手差价</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
+  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">销售报表</button><button data-mode="pass">过手差价</button><button data-mode="external">外部货</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
   const draw=async(key='30d',s='',e='')=>{
-    const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&inRange(x.createdAt,range));
+    const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&recordInBusinessRange(x,range,'sale'));
     const revenue=rows.reduce((a,x)=>a+n(x.finalAmount),0), qty=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+n(i.qty),0),0);
     const discount=rows.reduce((a,x)=>a+n(x.discountAmount),0), cost=rows.reduce((a,x)=>a+saleCostTotal(x),0), grossProfit=revenue-cost;
     const received=rows.reduce((a,x)=>a+reportReceivedAmount(x),0), currentReceivableGap=rows.filter(x=>!saleIsHistorical(x)).reduce((a,x)=>a+n(x.finalAmount)-n(x.received),0), historicalCount=rows.filter(saleIsHistorical).length;
@@ -1435,8 +1507,8 @@ async function renderReports(){
     $('#exportSalesReport').onclick=()=>exportSalesCSV(rows);
   };
   const drawPass=async(key='30d',s='',e='')=>{
-    const [deals,sales]=await Promise.all([getPassDeals(),dbAll('sales')]),range=dateRange(key,s,e),rows=passDealRowsForRange(deals,range),saleRows=sales.filter(x=>saleIsReportActive(x)&&inRange(x.createdAt,range));
-    const turnover=rows.reduce((a,x)=>a+n(x.saleAmount),0),cost=rows.reduce((a,x)=>a+n(x.costAmount),0),profit=turnover-cost,received=rows.reduce((a,x)=>a+passDealReceived(x),0),paid=rows.reduce((a,x)=>a+passDealSourcePaid(x),0),buyerDue=rows.reduce((a,x)=>a+passDealBuyerDue(x),0),sourceDue=rows.reduce((a,x)=>a+passDealSourceDue(x),0),salesProfit=analyticsRevenue(saleRows)-analyticsCost(saleRows);
+    const [deals,sales,externalGoods]=await Promise.all([getPassDeals(),dbAll('sales'),getExternalGoods()]),range=dateRange(key,s,e),rows=passDealRowsForRange(deals,range),saleRows=sales.filter(x=>saleIsReportActive(x)&&recordInBusinessRange(x,range,'sale')),externalRows=externalSoldRowsForRange(externalGoods,range);
+    const turnover=rows.reduce((a,x)=>a+n(x.saleAmount),0),cost=rows.reduce((a,x)=>a+n(x.costAmount),0),profit=turnover-cost,received=rows.reduce((a,x)=>a+passDealReceived(x),0),paid=rows.reduce((a,x)=>a+passDealSourcePaid(x),0),buyerDue=rows.reduce((a,x)=>a+passDealBuyerDue(x),0),sourceDue=rows.reduce((a,x)=>a+passDealSourceDue(x),0),salesProfit=analyticsRevenue(saleRows)-analyticsCost(saleRows),externalProfitTotal=externalRows.reduce((a,x)=>a+externalProfit(x),0);
     const sourceMap=new Map(),buyerMap=new Map();
     rows.forEach(r=>{let a=sourceMap.get(r.sourceName)||{name:r.sourceName,orders:0,amount:0,profit:0};a.orders++;a.amount+=n(r.costAmount);a.profit+=passDealProfit(r);sourceMap.set(r.sourceName,a);let b=buyerMap.get(r.buyerName)||{name:r.buyerName,orders:0,amount:0,profit:0};b.orders++;b.amount+=n(r.saleAmount);b.profit+=passDealProfit(r);buyerMap.set(r.buyerName,b);});
     const sourceRank=[...sourceMap.values()].sort((a,b)=>b.profit-a.profit),buyerRank=[...buyerMap.values()].sort((a,b)=>b.amount-a.amount);
@@ -1444,18 +1516,26 @@ async function renderReports(){
       <div class="notice"><strong>过手口径：</strong>只统计没有正式建商品的临时转差价。不会进入商品销量、库存周转、品类/颜色补货分析。下方合计经营毛利润只做经营参考。</div>
       <div class="section-title">过手经营概况</div><div class="grid-2"><div class="metric"><div class="label">过手成交额</div><div class="value">${fmtMoney(turnover)}</div><div class="hint">${rows.length} 笔过手单</div></div><div class="metric"><div class="label">差价利润</div><div class="value">${fmtMoney(profit)}</div><div class="hint">利润率 ${turnover?((profit/turnover)*100).toFixed(1):0}%</div></div><div class="metric"><div class="label">过手成本</div><div class="value">${fmtMoney(cost)}</div><div class="hint">已付货主 ${fmtMoney(paid)}</div></div><div class="metric"><div class="label">过手实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">买家未收 ${fmtMoney(buyerDue)}</div></div></div>
       <div class="section-title">结算风险</div><div class="grid-2"><div class="metric compact"><div class="label">买家未收</div><div class="value">${fmtMoney(buyerDue)}</div></div><div class="metric compact"><div class="label">货主未付</div><div class="value">${fmtMoney(sourceDue)}</div></div></div>
-      <div class="section-title">合计经营毛利润 <small>销售 + 过手</small></div><div class="total-box"><div class="total-row"><span>正式/调借销售毛利润</span><strong>${fmtMoney(salesProfit)}</strong></div><div class="total-row"><span>过手差价利润</span><strong>${fmtMoney(profit)}</strong></div><div class="total-row grand"><span>合计经营毛利润</span><strong>${fmtMoney(salesProfit+profit)}</strong></div></div>
+      <div class="section-title">合计经营毛利润 <small>销售 + 过手 + 外部货</small></div><div class="total-box"><div class="total-row"><span>正式/调借销售毛利润</span><strong>${fmtMoney(salesProfit)}</strong></div><div class="total-row"><span>过手差价利润</span><strong>${fmtMoney(profit)}</strong></div><div class="total-row"><span>外部货利润</span><strong>${fmtMoney(externalProfitTotal)}</strong></div><div class="total-row grand"><span>合计经营毛利润</span><strong>${fmtMoney(salesProfit+profit+externalProfitTotal)}</strong></div></div>
       <div class="section-title">货主利润贡献</div>${sourceRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>货主</th><th>单数</th><th>成本</th><th>差价利润</th></tr></thead><tbody>${sourceRank.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('↔','暂无货主数据')}
       <div class="section-title">买家成交排名</div>${buyerRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>买家</th><th>单数</th><th>成交额</th><th>贡献利润</th></tr></thead><tbody>${buyerRank.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('♙','暂无买家数据')}
       <button id="exportPassDeals" class="btn secondary block" style="margin-top:12px">导出当前过手差价 CSV</button>`;
     $('#exportPassDeals').onclick=()=>exportPassDealsCSV(rows);
   };
+  const drawExternal=async(key='30d',s='',e='')=>{
+    const [all,sales,deals]=await Promise.all([getExternalGoods(),dbAll('sales'),getPassDeals()]),range=dateRange(key,s,e),rows=externalSoldRowsForRange(all,range),openRows=all.filter(r=>r.status==='held'||r.status==='out');
+    const turnover=rows.reduce((a,r)=>a+n(r.saleAmount),0),cost=rows.reduce((a,r)=>a+n(r.ownerCostAmount),0),profit=rows.reduce((a,r)=>a+externalProfit(r),0),received=rows.reduce((a,r)=>a+n(r.receivedAmount),0),ownerPaid=rows.reduce((a,r)=>a+n(r.ownerPaidAmount),0),buyerDue=rows.reduce((a,r)=>a+externalBuyerDue(r),0),ownerDue=rows.reduce((a,r)=>a+externalOwnerDue(r),0);
+    const saleRows=sales.filter(x=>saleIsReportActive(x)&&recordInBusinessRange(x,range,'sale')),passRows=passDealRowsForRange(deals,range),salesProfit=saleRows.reduce((a,r)=>a+saleGrossProfit(r),0),passProfit=passRows.reduce((a,r)=>a+passDealProfit(r),0);
+    const ownerMap=new Map(),buyerMap=new Map();rows.forEach(r=>{let o=ownerMap.get(r.ownerName)||{name:r.ownerName,orders:0,profit:0,amount:0};o.orders++;o.profit+=externalProfit(r);o.amount+=n(r.ownerCostAmount);ownerMap.set(r.ownerName,o);let b=buyerMap.get(r.buyerName)||{name:r.buyerName,orders:0,profit:0,amount:0};b.orders++;b.profit+=externalProfit(r);b.amount+=n(r.saleAmount);buyerMap.set(r.buyerName,b);});
+    $('#reportBody').innerHTML=`<div class="notice"><strong>外部货口径：</strong>只统计货权属于别人的货。不会进入正式商品销量、库存成本和补货分析；只计算流转、结算与差价利润。</div><div class="section-title">外部货经营概况</div><div class="grid-2"><div class="metric"><div class="label">已售成交额</div><div class="value">${fmtMoney(turnover)}</div><div class="hint">${rows.length} 笔已售</div></div><div class="metric"><div class="label">外部货利润</div><div class="value">${fmtMoney(profit)}</div><div class="hint">利润率 ${turnover?((profit/turnover)*100).toFixed(1):0}%</div></div><div class="metric"><div class="label">本期实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">买家未收 ${fmtMoney(buyerDue)}</div></div><div class="metric"><div class="label">货主结算</div><div class="value">${fmtMoney(ownerPaid)}</div><div class="hint">已售未付货主 ${fmtMoney(ownerDue)}</div></div></div><div class="section-title">当前未处理外部货</div><div class="grid-3"><div class="metric compact"><div class="label">在我这里</div><div class="value">${openRows.filter(r=>r.status==='held').length}</div></div><div class="metric compact"><div class="label">调给同行</div><div class="value">${openRows.filter(r=>r.status==='out').length}</div></div><div class="metric compact"><div class="label">责任/底价</div><div class="value">${fmtMoney(openRows.reduce((a,r)=>a+n(r.ownerCostAmount),0))}</div></div></div><div class="section-title">经营毛利润合计 <small>销售 + 过手 + 外部货</small></div><div class="total-box"><div class="total-row"><span>正式/调借销售毛利润</span><strong>${fmtMoney(salesProfit)}</strong></div><div class="total-row"><span>直接过手利润</span><strong>${fmtMoney(passProfit)}</strong></div><div class="total-row"><span>外部货利润</span><strong>${fmtMoney(profit)}</strong></div><div class="total-row grand"><span>合计经营毛利润</span><strong>${fmtMoney(salesProfit+passProfit+profit)}</strong></div></div><div class="section-title">货主利润贡献</div>${[...ownerMap.values()].length?`<div class="table-wrap"><table class="table"><thead><tr><th>货主</th><th>已售</th><th>货主底价</th><th>利润</th></tr></thead><tbody>${[...ownerMap.values()].sort((a,b)=>b.profit-a.profit).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('◇','暂无已售外部货')}<div class="section-title">当前去向</div>${openRows.length?`<div class="list">${openRows.slice(0,12).map(externalGoodCard).join('')}</div>`:emptyState('✓','没有未处理外部货')}`;
+  };
   let currentMode='report',currentRange='30d',customStart='',customEnd='';
-  const renderCurrent=()=>currentMode==='pass'?drawPass(currentRange,customStart,customEnd):draw(currentRange,customStart,customEnd);
+  const renderCurrent=()=>currentMode==='pass'?drawPass(currentRange,customStart,customEnd):currentMode==='external'?drawExternal(currentRange,customStart,customEnd):draw(currentRange,customStart,customEnd);
   const showReport=()=>{currentMode='report';$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='report'));renderCurrent();};
   const showPass=()=>{currentMode='pass';$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='pass'));renderCurrent();};
-  const showAssistant=async()=>{currentMode='assistant';$('#reportRange').classList.add('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='assistant'));$('#reportBody').innerHTML='<div class="assistant-loading">正在分析经营数据…</div>';const [sales,products,customers,loans]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),dbAll('loans')]);renderOperatingAssistant($('#reportBody'),buildOperatingAnalytics(sales,products,customers,loans));const host=$('#reportBody');if(host)host.insertAdjacentHTML('afterbegin','<div class="notice">经营助手测试阶段仍按正式商品/调借销售做品类、颜色和库存分析；过手差价保持独立，避免污染补货判断。</div>');};
-  $$('#reportMode button').forEach(b=>b.onclick=()=>b.dataset.mode==='assistant'?showAssistant():b.dataset.mode==='pass'?showPass():showReport());
+  const showExternal=()=>{currentMode='external';$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='external'));renderCurrent();};
+  const showAssistant=async()=>{currentMode='assistant';$('#reportRange').classList.add('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='assistant'));$('#reportBody').innerHTML='<div class="assistant-loading">正在分析经营数据…</div>';const [sales,products,customers,loans]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),dbAll('loans')]);renderOperatingAssistant($('#reportBody'),buildOperatingAnalytics(sales,products,customers,loans));const host=$('#reportBody');if(host)host.insertAdjacentHTML('afterbegin','<div class="notice">经营助手仍只用正式商品/调借销售做品类、颜色和库存分析；过手差价、外部同行货保持独立，避免污染补货判断。</div>');};
+  $$('#reportMode button').forEach(b=>b.onclick=()=>b.dataset.mode==='assistant'?showAssistant():b.dataset.mode==='pass'?showPass():b.dataset.mode==='external'?showExternal():showReport());
   draw();
   $$('#reportRange button').forEach(b=>b.onclick=()=>{
     if(b.dataset.range==='custom'){
@@ -1684,7 +1764,7 @@ async function renderSettings(){
   <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：v3.10-test · 过手差价测试版 · 核心交易/UI稳定基线保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：v3.10.1-test · 今日销售日期修复 + 外部货流转测试 · 核心交易/UI稳定基线保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
