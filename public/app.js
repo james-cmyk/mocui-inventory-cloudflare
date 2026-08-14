@@ -4,10 +4,10 @@ const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
 const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more'};
+const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals'};
 let db;
 let routeStack=[];
-let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
+let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, passDealDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
 let navigationToken=0;
 
 // Core transaction safety guard: these operations must stay stable across feature/UI updates.
@@ -38,7 +38,9 @@ function coreHandlerStatus(){
     ['新增调借',typeof openLoanForm==='function'],['借调售出',typeof openLoanSaleForm==='function'],
     ['调借归还',typeof openLoanReturnForm==='function'],['库存盘点',typeof renderStocktake==='function'],
     ['库存调整',typeof adjustStock==='function'],['库存校验',typeof validateStock==='function'],
-    ['撤销销售',typeof cancelSale==='function'],['恢复销售',typeof restoreSale==='function']
+    ['撤销销售',typeof cancelSale==='function'],['恢复销售',typeof restoreSale==='function'],
+    ['过手差价',typeof savePassDeal==='function'],['过手单管理',typeof renderPassDeals==='function'],
+    ['过手库存隔离',typeof savePassDeal==='function'&&!/adjustStock\s*\(|stockMoves|dbPut\(\s*["\']products["\']/.test(savePassDeal.toString())]
   ];
   return checks.filter(([,ok])=>!ok).map(([name])=>name);
 }
@@ -428,7 +430,7 @@ function navRouteFor(route){
   if(route==='products' || route.startsWith('product')) return 'products';
   if(route==='loans' || route.startsWith('loan')) return 'loans';
   if(route==='reports') return 'reports';
-  if(route==='more' || ['content','shortcut-setup','customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import'].includes(route)) return 'more';
+  if(route==='more' || ['content','shortcut-setup','customers','stocktake','ledger','settings','audit','health','sales','qinsilk-import','pass-deals','pass-deal-new'].includes(route)) return 'more';
   return route;
 }
 function setActiveNav(route){
@@ -609,6 +611,7 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
+    'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew,
     more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
@@ -616,7 +619,7 @@ async function render(){
 
 async function renderDashboard(){
   setHeader('漠翠进销存','经营概况');
-  const [products,sales,loans]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans')]);
+  const [products,sales,loans,passDeals]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals()]);
   const activeSales=sales.filter(saleIsReportActive);
   const today=dateRange('today'), monthStart=new Date(new Date().getFullYear(),new Date().getMonth(),1);
   const todaySales=activeSales.filter(s=>inRange(s.createdAt,today));
@@ -626,6 +629,7 @@ async function renderDashboard(){
   const inventoryCost=catalogProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   const sumAmount=rows=>rows.reduce((s,r)=>s+n(r.finalAmount),0);
   const profit=rows=>rows.reduce((s,r)=>s+saleGrossProfit(r),0);
+  const activePassDeals=passDeals.filter(passDealIsActive),todayPassDeals=activePassDeals.filter(d=>inRange(d.createdAt,today));
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
   $('#main').innerHTML=`
@@ -647,8 +651,9 @@ async function renderDashboard(){
       <button class="btn block" id="quickSale">销售开单</button><button class="btn secondary block" id="quickProduct">新增商品</button>
       <button class="btn secondary block" id="quickLoan">新增调借</button><button class="btn secondary block" id="quickStocktake">库存盘点</button>
     </div>
+    <button class="btn secondary block" id="quickPassDeal" style="margin-top:10px">过手差价（测试）${todayPassDeals.length?` · 今日 ${todayPassDeals.length}单 / 利润 ${fmtMoney(todayPassDeals.reduce((a,d)=>a+passDealProfit(d),0))}`:''}</button>
     <button class="content-dashboard-link" id="quickContent"><span><strong>内容工作台</strong><small>今日待发 · 图片视频 · 文案 · 重复曝光</small></span><b>›</b></button>`;
-  $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickContent').onclick=()=>navigate('content');
+  $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickPassDeal').onclick=()=>navigate('pass-deal-new'); $('#quickContent').onclick=()=>navigate('content');
 }
 
 function categoryPickerRowsHTML(categories,selectedId='',expandedRoots=new Set(),query='',allowAll=true){
@@ -1177,6 +1182,135 @@ function analyticsMonthKey(value){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 function analyticsMonthLabel(key){const [y,m]=String(key||'').split('-');return y&&m?`${y}年${n(m)}月`:key||'';}
+// ===== 过手差价（测试模块） =====
+// 独立业务账：不创建商品、不修改商品库存、不写 stockMoves；只记录成交、成本、收付款和差价利润。
+const PASS_DEAL_PENDING_KEY='mocui_pass_deal_pending_v1';
+const PASS_DEAL_LEDGER_ID='passDealsLedgerV1';
+async function getPassDealLedger(){const row=await dbGet('settings',PASS_DEAL_LEDGER_ID);return row&&Array.isArray(row.rows)?row:{id:PASS_DEAL_LEDGER_ID,version:1,rows:[],updatedAt:''};}
+async function getPassDeals(){return (await getPassDealLedger()).rows||[];}
+async function getPassDeal(id){return (await getPassDeals()).find(x=>x.id===id)||null;}
+async function putPassDeal(row){const ledger=await getPassDealLedger(),idx=ledger.rows.findIndex(x=>x.id===row.id);if(idx>=0)ledger.rows[idx]=row;else ledger.rows.push(row);ledger.updatedAt=nowISO();await dbPut('settings',ledger);return row;}
+function passDealIsActive(row){return row?.status!=='cancelled';}
+function passDealProfit(row){return n(row?.saleAmount)-n(row?.costAmount);}
+function passDealReceived(row){return Math.max(0,n(row?.receivedAmount));}
+function passDealSourcePaid(row){return Math.max(0,n(row?.sourcePaidAmount));}
+function passDealBuyerDue(row){return Math.max(0,n(row?.saleAmount)-passDealReceived(row));}
+function passDealSourceDue(row){return Math.max(0,n(row?.costAmount)-passDealSourcePaid(row));}
+function passDealNewDraft(){return {createdAt:localInputDateTime(),itemName:'',qty:1,sourceName:'',buyerName:'',costAmount:'',saleAmount:'',receivedAmount:'',sourcePaidAmount:'',note:'',image:'',__corePassDealId:'',__corePassDealNo:''};}
+async function nextPassDealNo(){
+  const rows=await getPassDeals(),d=new Date(),ymd=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const prefix=`GS${ymd}`,max=rows.reduce((m,row)=>{const no=String(row.dealNo||'');if(!no.startsWith(prefix))return m;return Math.max(m,n(no.slice(prefix.length)));},0);
+  return `${prefix}${String(max+1).padStart(4,'0')}`;
+}
+function syncPassDealFormToDraft(){
+  if(appState.route!=='pass-deal-new'||!appState.passDealDraft)return appState.passDealDraft;
+  const d=appState.passDealDraft;
+  d.createdAt=$('#passDealDate')?.value||d.createdAt||localInputDateTime();
+  d.itemName=$('#passDealItem')?.value.trim()||'';
+  d.qty=Math.max(.01,n($('#passDealQty')?.value||1));
+  d.sourceName=$('#passDealSource')?.value.trim()||'';
+  d.buyerName=$('#passDealBuyer')?.value.trim()||'';
+  d.costAmount=$('#passDealCost')?.value??'';
+  d.saleAmount=$('#passDealSale')?.value??'';
+  d.receivedAmount=$('#passDealReceived')?.value??'';
+  d.sourcePaidAmount=$('#passDealPaid')?.value??'';
+  d.note=$('#passDealNote')?.value||'';
+  saveLocalDraft(PASS_DEAL_PENDING_KEY,{...d,image:d.image||''});
+  return d;
+}
+function passDealSummaryHTML(d){
+  const cost=n(d.costAmount),sale=n(d.saleAmount),profit=sale-cost,received=d.receivedAmount===''?sale:n(d.receivedAmount),paid=d.sourcePaidAmount===''?cost:n(d.sourcePaidAmount);
+  return `<div class="total-box"><div class="total-row"><span>成交额</span><strong>${fmtMoney(sale)}</strong></div><div class="total-row"><span>成本 / 应付货主</span><strong>${fmtMoney(cost)}</strong></div><div class="total-row"><span>实收 / 已付货主</span><strong>${fmtMoney(received)} / ${fmtMoney(paid)}</strong></div><div class="total-row grand"><span>差价利润</span><strong>${fmtMoney(profit)}</strong></div></div>`;
+}
+async function renderPassDealNew(){
+  setHeader('过手差价（测试）','不建商品 · 不动库存 · 独立记差价');
+  if(!appState.passDealDraft){
+    const pending=loadLocalDraft(PASS_DEAL_PENDING_KEY);
+    appState.passDealDraft=pending&&typeof pending==='object'?{...passDealNewDraft(),...pending}:passDealNewDraft();
+  }
+  const d=appState.passDealDraft,[customers,loans]=await Promise.all([dbAll('customers'),dbAll('loans')]);
+  const people=[...new Set([...customers.map(c=>c.name),...loans.map(l=>l.person)].map(x=>String(x||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  $('#main').innerHTML=`
+    <div class="notice warn"><strong>测试模块 · 已加入保护区</strong><br>不会进入商品库、不会扣减库存、不会写库存流水，也不会混入普通商品销售排行。保存时使用按钮锁 + 固定业务ID，异常重试不会重复生成过手单。</div>
+    <form id="passDealForm" autocomplete="off">
+      <div class="form-group"><label class="form-label">货品描述 *</label><input id="passDealItem" class="input" value="${esc(d.itemName)}" placeholder="如：碧玉手镯 56圈" required></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">数量</label><input id="passDealQty" class="input" type="number" min="0.01" step="0.01" value="${esc(d.qty||1)}"></div><div class="form-group"><label class="form-label">成交时间</label><input id="passDealDate" class="input" type="datetime-local" value="${esc(d.createdAt||localInputDateTime())}"></div></div>
+      <div class="form-row"><div class="form-group autocomplete"><label class="form-label">货主 / 来源 *</label><input id="passDealSource" class="input" value="${esc(d.sourceName)}" placeholder="同行姓名" required><div id="passDealSourceSuggest" class="autocomplete-list hidden"></div></div><div class="form-group autocomplete"><label class="form-label">卖给谁 *</label><input id="passDealBuyer" class="input" value="${esc(d.buyerName)}" placeholder="同行 / 客户" required><div id="passDealBuyerSuggest" class="autocomplete-list hidden"></div></div></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">拿货成本 *</label><input id="passDealCost" class="input" type="number" min="0" step="0.01" value="${esc(d.costAmount)}" placeholder="0" required></div><div class="form-group"><label class="form-label">成交价 *</label><input id="passDealSale" class="input" type="number" min="0" step="0.01" value="${esc(d.saleAmount)}" placeholder="0" required></div></div>
+      <div class="form-row"><div class="form-group"><label class="form-label">本次实收</label><input id="passDealReceived" class="input" type="number" min="0" step="0.01" value="${esc(d.receivedAmount)}" placeholder="留空=已收全款"></div><div class="form-group"><label class="form-label">已付货主</label><input id="passDealPaid" class="input" type="number" min="0" step="0.01" value="${esc(d.sourcePaidAmount)}" placeholder="留空=已结清成本"></div></div>
+      <div class="form-group"><label class="form-label">照片（可选）</label><div class="form-row" style="grid-template-columns:auto 1fr"><label class="btn secondary" for="passDealImageInput">选择照片</label><input id="passDealImageInput" class="hidden" type="file" accept="image/*"><div id="passDealImagePreview">${d.image?`<img class="thumb" style="width:64px;height:64px" src="${esc(d.image)}" alt="过手货照片">`:'<span class="field-help">不用建商品，临时留一张图即可</span>'}</div></div></div>
+      <div class="form-group"><label class="form-label">备注</label><textarea id="passDealNote" class="textarea" placeholder="付款方式、货品特征、结算说明等">${esc(d.note)}</textarea></div>
+      <div id="passDealLiveTotal">${passDealSummaryHTML(d)}</div>
+      <button id="savePassDealBtn" class="btn block" type="submit">确认记录过手单</button>
+      <button id="viewPassDealsBtn" class="btn secondary block" type="button" style="margin-top:8px">查看过手单记录</button>
+    </form>`;
+  const refresh=()=>{syncPassDealFormToDraft();$('#passDealLiveTotal').innerHTML=passDealSummaryHTML(appState.passDealDraft);};
+  const wireSuggest=(inputId,listId)=>{
+    const input=$(inputId),box=$(listId);
+    const draw=()=>{const q=input.value.trim().toLowerCase(),rows=q?people.filter(name=>name.toLowerCase().includes(q)).slice(0,8):[];box.innerHTML=rows.map(name=>`<button type="button" class="autocomplete-option" data-name="${esc(name)}"><strong>${esc(name)}</strong></button>`).join('');box.classList.toggle('hidden',!rows.length);$$('.autocomplete-option',box).forEach(btn=>btn.onclick=()=>{input.value=btn.dataset.name;box.classList.add('hidden');refresh();});};
+    input.oninput=()=>{draw();refresh();};input.onfocus=draw;input.onblur=()=>setTimeout(()=>box.classList.add('hidden'),160);
+  };
+  wireSuggest('#passDealSource','#passDealSourceSuggest');wireSuggest('#passDealBuyer','#passDealBuyerSuggest');
+  ['passDealItem','passDealQty','passDealDate','passDealCost','passDealSale','passDealReceived','passDealPaid','passDealNote'].forEach(id=>{const el=$('#'+id);if(el)el.oninput=refresh;});
+  $('#passDealImageInput').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;d.image=await compressImage(f,1000,.72);e.target.value='';saveLocalDraft(PASS_DEAL_PENDING_KEY,{...d});$('#passDealImagePreview').innerHTML=`<img class="thumb" style="width:64px;height:64px" src="${esc(d.image)}" alt="过手货照片">`;};
+  $('#passDealForm').onsubmit=async e=>{e.preventDefault();await savePassDeal($('#savePassDealBtn'));};
+  $('#viewPassDealsBtn').onclick=()=>{syncPassDealFormToDraft();navigate('pass-deals');};
+}
+async function savePassDeal(btn){
+  return withCoreActionLock('pass-deal-save',btn,'正在记录…',async()=>{
+    const d=syncPassDealFormToDraft()||passDealNewDraft();
+    if(!d.itemName||!d.sourceName||!d.buyerName)throw new Error('请填写货品、货主和买家');
+    const cost=n(d.costAmount),sale=n(d.saleAmount);
+    if(cost<0||sale<0)throw new Error('成本和成交价不能小于0');
+    d.__corePassDealId=d.__corePassDealId||uid('pass');
+    d.__corePassDealNo=d.__corePassDealNo||await nextPassDealNo();
+    saveLocalDraft(PASS_DEAL_PENDING_KEY,{...d});
+    const existing=await getPassDeal(d.__corePassDealId);
+    if(existing){clearLocalDraft(PASS_DEAL_PENDING_KEY);appState.passDealDraft=null;showToast(`过手单已存在：${existing.dealNo}`);navigate('pass-deals',{highlight:existing.id});return;}
+    const row={id:d.__corePassDealId,dealNo:d.__corePassDealNo,itemName:d.itemName,qty:Math.max(.01,n(d.qty)||1),sourceName:d.sourceName,buyerName:d.buyerName,costAmount:cost,saleAmount:sale,receivedAmount:d.receivedAmount===''?sale:Math.max(0,n(d.receivedAmount)),sourcePaidAmount:d.sourcePaidAmount===''?cost:Math.max(0,n(d.sourcePaidAmount)),note:d.note||'',image:d.image||'',status:'active',sourceType:'pass_deal',stockApplied:false,createdAt:d.createdAt?new Date(d.createdAt).toISOString():nowISO(),updatedAt:nowISO(),coreVersion:1};
+    await putPassDeal(row);
+    await writeAudit('passdeal.create','passDeal',row.id,`${row.dealNo} · ${row.sourceName} → ${row.buyerName} · 利润 ${fmtMoney(passDealProfit(row))}`,null,row);
+    clearLocalDraft(PASS_DEAL_PENDING_KEY);appState.passDealDraft=null;
+    showToast(`过手单已记录：利润 ${fmtMoney(passDealProfit(row))}`);
+    navigate('pass-deals',{highlight:row.id});
+  }).catch(err=>showToast(err?.message||'过手单保存失败，请重试'));
+}
+function passDealCard(row){
+  const profit=passDealProfit(row),cancelled=!passDealIsActive(row);
+  return `<div class="card pass-deal-card" data-id="${row.id}" style="${cancelled?'opacity:.72':''}"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="item-title">${esc(row.itemName)} · ${esc(row.dealNo)}</div><div class="item-meta">${fmtDateTime(row.createdAt)} · ${esc(row.sourceName)} → ${esc(row.buyerName)}</div></div><div class="item-right"><strong>${fmtMoney(profit)}</strong><span class="badge ${cancelled?'danger':profit>=0?'success':'warn'}">${cancelled?'已作废':'差价'}</span></div></div><div class="item-meta" style="margin-top:8px">成交 ${fmtMoney(row.saleAmount)} · 成本 ${fmtMoney(row.costAmount)} · 实收 ${fmtMoney(row.receivedAmount)} · 已付货主 ${fmtMoney(row.sourcePaidAmount)}</div>${passDealBuyerDue(row)||passDealSourceDue(row)?`<div class="notice warn" style="margin-top:8px">买家未收 ${fmtMoney(passDealBuyerDue(row))} · 货主未付 ${fmtMoney(passDealSourceDue(row))}</div>`:''}<div class="btn-row" style="margin-top:10px">${cancelled?`<button class="btn small success restore-pass-deal" data-id="${row.id}">恢复</button>`:`<button class="btn small danger cancel-pass-deal" data-id="${row.id}">作废</button>`}</div></div>`;
+}
+async function renderPassDeals(){
+  setHeader('过手差价','独立成交、成本、收付款与差价',{label:'＋',onClick:()=>{appState.passDealDraft=null;clearLocalDraft(PASS_DEAL_PENDING_KEY);navigate('pass-deal-new');}});
+  const rows=(await getPassDeals()).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  $('#main').innerHTML=`<div class="notice"><strong>独立账，不影响库存。</strong> 普通销售、调借销售仍走原来的销售/库存流程；这里仅用于没有正式建商品的临时过手差价。</div><div class="segment" id="passDealStatus"><button data-status="active" class="active">有效</button><button data-status="all">全部</button><button data-status="cancelled">已作废</button></div><div class="toolbar"><div class="search"><input id="passDealSearch" placeholder="货品、货主、买家、单号"></div></div><div id="passDealList" class="list"></div>`;
+  let status='active';
+  const draw=()=>{const q=$('#passDealSearch').value.trim().toLowerCase(),filtered=rows.filter(r=>(status==='all'||(status==='active'?passDealIsActive(r):!passDealIsActive(r)))&&(!q||[r.dealNo,r.itemName,r.sourceName,r.buyerName,r.note].some(v=>String(v||'').toLowerCase().includes(q))));$('#passDealList').innerHTML=filtered.length?filtered.map(passDealCard).join(''):emptyState('↔','暂无过手差价记录','点右上角＋记录一笔临时转差价');$$('.pass-deal-card').forEach(el=>el.onclick=e=>{if(e.target.closest('button'))return;openPassDealDetail(rows.find(x=>x.id===el.dataset.id));});$$('.cancel-pass-deal').forEach(b=>b.onclick=()=>cancelPassDeal(b.dataset.id));$$('.restore-pass-deal').forEach(b=>b.onclick=()=>restorePassDeal(b.dataset.id));};
+  draw();$('#passDealSearch').oninput=draw;$$('#passDealStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#passDealStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
+}
+function openPassDealDetail(row){
+  if(!row)return;const profit=passDealProfit(row);
+  openModal(`过手单 ${row.dealNo}`,`${row.image?`<img src="${esc(row.image)}" alt="过手货" style="display:block;width:100%;max-height:260px;object-fit:contain;border-radius:12px;margin-bottom:10px">`:''}<div class="grid-2"><div class="metric compact"><div class="label">货主</div><div class="value" style="font-size:14px">${esc(row.sourceName)}</div></div><div class="metric compact"><div class="label">买家</div><div class="value" style="font-size:14px">${esc(row.buyerName)}</div></div></div><div class="section-title">${esc(row.itemName)} <small>数量 ${fmtInt(row.qty)}</small></div><div class="total-box"><div class="total-row"><span>成交</span><strong>${fmtMoney(row.saleAmount)}</strong></div><div class="total-row"><span>成本</span><strong>${fmtMoney(row.costAmount)}</strong></div><div class="total-row"><span>实收 / 买家未收</span><strong>${fmtMoney(row.receivedAmount)} / ${fmtMoney(passDealBuyerDue(row))}</strong></div><div class="total-row"><span>已付货主 / 未付</span><strong>${fmtMoney(row.sourcePaidAmount)} / ${fmtMoney(passDealSourceDue(row))}</strong></div><div class="total-row grand"><span>差价利润</span><strong>${fmtMoney(profit)}</strong></div></div><div class="notice">状态：${passDealIsActive(row)?'有效':'已作废'}<br>时间：${fmtDateTime(row.createdAt)}<br>备注：${esc(row.note||'无')}<br><strong>库存影响：0</strong></div>`,{});
+}
+async function cancelPassDeal(id){
+  const row=await getPassDeal(id);if(!row||!passDealIsActive(row))return;
+  if(!await confirmDialog('确定作废这笔过手单？不会影响任何商品库存。'))return;
+  row.status='cancelled';row.cancelledAt=nowISO();row.updatedAt=nowISO();await putPassDeal(row);
+  await writeAudit('passdeal.cancel','passDeal',row.id,`${row.dealNo} 已作废`,null,{status:row.status});showToast('过手单已作废');renderPassDeals();
+}
+async function restorePassDeal(id){
+  const row=await getPassDeal(id);if(!row||passDealIsActive(row))return;
+  if(!await confirmDialog('恢复这笔过手单并重新计入过手报表？'))return;
+  row.status='active';row.cancelledAt=null;row.updatedAt=nowISO();await putPassDeal(row);
+  await writeAudit('passdeal.restore','passDeal',row.id,`${row.dealNo} 已恢复`,null,{status:row.status});showToast('过手单已恢复');renderPassDeals();
+}
+function passDealRowsForRange(rows,range){return (rows||[]).filter(r=>passDealIsActive(r)&&inRange(r.createdAt,range));}
+function exportPassDealsCSV(rows){
+  const head=['过手单号','时间','货品','数量','货主/来源','买家','成本','成交额','差价利润','实收','买家未收','已付货主','货主未付','备注','状态'];
+  const out=rows.map(r=>[r.dealNo,fmtDateTime(r.createdAt),r.itemName,r.qty,r.sourceName,r.buyerName,r.costAmount,r.saleAmount,passDealProfit(r),r.receivedAmount,passDealBuyerDue(r),r.sourcePaidAmount,passDealSourceDue(r),r.note,passDealIsActive(r)?'有效':'已作废']);
+  downloadBlob('\ufeff'+[head,...out].map(r=>r.map(csvCell).join(',')).join('\n'),`过手差价报表_${new Date().toISOString().slice(0,10)}.csv`,'text/csv;charset=utf-8');
+}
+// ===== 过手差价模块结束 =====
+
 function analyticsMonthName(month){return `${n(month)}月`;}
 function analyticsChange(curr,prev){if(!prev)return curr?null:0;return ((curr-prev)/Math.abs(prev))*100;}
 function analyticsChangeText(curr,prev){const rate=analyticsChange(curr,prev);if(rate===null)return '上期无可比数据';if(Math.abs(rate)<.05)return '与上期基本持平';return `${rate>0?'↑':'↓'} ${Math.abs(rate).toFixed(1)}%`;}
@@ -1279,8 +1413,8 @@ function renderOperatingAssistant(host,a){
 }
 
 async function renderReports(){
-  setHeader('统计报表','经营概况、销售、利润、客户、商品 · 经营助手');
-  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">统计报表</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
+  setHeader('统计报表','销售、过手差价、利润、客户、商品 · 经营助手');
+  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">销售报表</button><button data-mode="pass">过手差价</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
   const draw=async(key='30d',s='',e='')=>{
     const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&inRange(x.createdAt,range));
     const revenue=rows.reduce((a,x)=>a+n(x.finalAmount),0), qty=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+n(i.qty),0),0);
@@ -1291,6 +1425,7 @@ async function renderReports(){
     const customerRank=Object.values(customerMap).sort((a,b)=>b.amount-a.amount); const productRank=Object.values(productMap).sort((a,b)=>b.amount-a.amount);
     const catalogProducts=products.filter(p=>!p.historicalOnly),inventoryCost=catalogProducts.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0), inventoryQty=catalogProducts.reduce((a,p)=>a+n(p.stock),0);
     $('#reportBody').innerHTML=`
+      <div class="notice"><strong>销售口径：</strong>正式商品销售 + 调借售出 + 秦丝历史销售。过手差价不混入这里。</div>
       <div class="section-title">经营概况</div><div class="grid-2"><div class="metric"><div class="label">销售额</div><div class="value">${fmtMoney(revenue)}</div><div class="hint">${rows.length} 笔订单</div></div><div class="metric"><div class="label">本期实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">${historicalCount?`秦丝历史按成交额计 · `:''}当前应收差额 ${fmtMoney(currentReceivableGap)}</div></div><div class="metric"><div class="label">销售数量</div><div class="value">${fmtInt(qty)}</div><div class="hint">商品件数</div></div><div class="metric"><div class="label">毛利润</div><div class="value">${fmtMoney(grossProfit)}</div><div class="hint">毛利率 ${revenue?((grossProfit/revenue)*100).toFixed(1):0}%</div></div></div>
       <div class="section-title">利润分析</div><div class="grid-3"><div class="metric compact"><div class="label">销售成本</div><div class="value">${fmtMoney(cost)}</div></div><div class="metric compact"><div class="label">优惠抹零</div><div class="value">${fmtMoney(discount)}</div></div><div class="metric compact"><div class="label">单均金额</div><div class="value">${fmtMoney(rows.length?revenue/rows.length:0)}</div></div></div>
       <div class="section-title">库存汇总</div><div class="grid-3"><div class="metric compact"><div class="label">商品数量</div><div class="value">${catalogProducts.length}</div></div><div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div></div>
@@ -1299,11 +1434,38 @@ async function renderReports(){
       <button id="exportSalesReport" class="btn secondary block" style="margin-top:12px">导出当前销售报表 CSV</button>`;
     $('#exportSalesReport').onclick=()=>exportSalesCSV(rows);
   };
-  const showReport=()=>{$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='report'));draw();};
-  const showAssistant=async()=>{$('#reportRange').classList.add('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='assistant'));$('#reportBody').innerHTML='<div class="assistant-loading">正在分析经营数据…</div>';const [sales,products,customers,loans]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),dbAll('loans')]);renderOperatingAssistant($('#reportBody'),buildOperatingAnalytics(sales,products,customers,loans));};
-  $$('#reportMode button').forEach(b=>b.onclick=()=>b.dataset.mode==='assistant'?showAssistant():showReport());
-  draw();$$('#reportRange button').forEach(b=>b.onclick=()=>{if(b.dataset.range==='custom'){openDateRangePicker((s,e)=>draw('custom',s,e));return;}$$('#reportRange button').forEach(x=>x.classList.toggle('active',x===b));draw(b.dataset.range);});
+  const drawPass=async(key='30d',s='',e='')=>{
+    const [deals,sales]=await Promise.all([getPassDeals(),dbAll('sales')]),range=dateRange(key,s,e),rows=passDealRowsForRange(deals,range),saleRows=sales.filter(x=>saleIsReportActive(x)&&inRange(x.createdAt,range));
+    const turnover=rows.reduce((a,x)=>a+n(x.saleAmount),0),cost=rows.reduce((a,x)=>a+n(x.costAmount),0),profit=turnover-cost,received=rows.reduce((a,x)=>a+passDealReceived(x),0),paid=rows.reduce((a,x)=>a+passDealSourcePaid(x),0),buyerDue=rows.reduce((a,x)=>a+passDealBuyerDue(x),0),sourceDue=rows.reduce((a,x)=>a+passDealSourceDue(x),0),salesProfit=analyticsRevenue(saleRows)-analyticsCost(saleRows);
+    const sourceMap=new Map(),buyerMap=new Map();
+    rows.forEach(r=>{let a=sourceMap.get(r.sourceName)||{name:r.sourceName,orders:0,amount:0,profit:0};a.orders++;a.amount+=n(r.costAmount);a.profit+=passDealProfit(r);sourceMap.set(r.sourceName,a);let b=buyerMap.get(r.buyerName)||{name:r.buyerName,orders:0,amount:0,profit:0};b.orders++;b.amount+=n(r.saleAmount);b.profit+=passDealProfit(r);buyerMap.set(r.buyerName,b);});
+    const sourceRank=[...sourceMap.values()].sort((a,b)=>b.profit-a.profit),buyerRank=[...buyerMap.values()].sort((a,b)=>b.amount-a.amount);
+    $('#reportBody').innerHTML=`
+      <div class="notice"><strong>过手口径：</strong>只统计没有正式建商品的临时转差价。不会进入商品销量、库存周转、品类/颜色补货分析。下方合计经营毛利润只做经营参考。</div>
+      <div class="section-title">过手经营概况</div><div class="grid-2"><div class="metric"><div class="label">过手成交额</div><div class="value">${fmtMoney(turnover)}</div><div class="hint">${rows.length} 笔过手单</div></div><div class="metric"><div class="label">差价利润</div><div class="value">${fmtMoney(profit)}</div><div class="hint">利润率 ${turnover?((profit/turnover)*100).toFixed(1):0}%</div></div><div class="metric"><div class="label">过手成本</div><div class="value">${fmtMoney(cost)}</div><div class="hint">已付货主 ${fmtMoney(paid)}</div></div><div class="metric"><div class="label">过手实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">买家未收 ${fmtMoney(buyerDue)}</div></div></div>
+      <div class="section-title">结算风险</div><div class="grid-2"><div class="metric compact"><div class="label">买家未收</div><div class="value">${fmtMoney(buyerDue)}</div></div><div class="metric compact"><div class="label">货主未付</div><div class="value">${fmtMoney(sourceDue)}</div></div></div>
+      <div class="section-title">合计经营毛利润 <small>销售 + 过手</small></div><div class="total-box"><div class="total-row"><span>正式/调借销售毛利润</span><strong>${fmtMoney(salesProfit)}</strong></div><div class="total-row"><span>过手差价利润</span><strong>${fmtMoney(profit)}</strong></div><div class="total-row grand"><span>合计经营毛利润</span><strong>${fmtMoney(salesProfit+profit)}</strong></div></div>
+      <div class="section-title">货主利润贡献</div>${sourceRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>货主</th><th>单数</th><th>成本</th><th>差价利润</th></tr></thead><tbody>${sourceRank.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('↔','暂无货主数据')}
+      <div class="section-title">买家成交排名</div>${buyerRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>买家</th><th>单数</th><th>成交额</th><th>贡献利润</th></tr></thead><tbody>${buyerRank.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtMoney(x.amount)}</td><td>${fmtMoney(x.profit)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('♙','暂无买家数据')}
+      <button id="exportPassDeals" class="btn secondary block" style="margin-top:12px">导出当前过手差价 CSV</button>`;
+    $('#exportPassDeals').onclick=()=>exportPassDealsCSV(rows);
+  };
+  let currentMode='report',currentRange='30d',customStart='',customEnd='';
+  const renderCurrent=()=>currentMode==='pass'?drawPass(currentRange,customStart,customEnd):draw(currentRange,customStart,customEnd);
+  const showReport=()=>{currentMode='report';$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='report'));renderCurrent();};
+  const showPass=()=>{currentMode='pass';$('#reportRange').classList.remove('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='pass'));renderCurrent();};
+  const showAssistant=async()=>{currentMode='assistant';$('#reportRange').classList.add('hidden');$$('#reportMode button').forEach(b=>b.classList.toggle('active',b.dataset.mode==='assistant'));$('#reportBody').innerHTML='<div class="assistant-loading">正在分析经营数据…</div>';const [sales,products,customers,loans]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),dbAll('loans')]);renderOperatingAssistant($('#reportBody'),buildOperatingAnalytics(sales,products,customers,loans));const host=$('#reportBody');if(host)host.insertAdjacentHTML('afterbegin','<div class="notice">经营助手测试阶段仍按正式商品/调借销售做品类、颜色和库存分析；过手差价保持独立，避免污染补货判断。</div>');};
+  $$('#reportMode button').forEach(b=>b.onclick=()=>b.dataset.mode==='assistant'?showAssistant():b.dataset.mode==='pass'?showPass():showReport());
+  draw();
+  $$('#reportRange button').forEach(b=>b.onclick=()=>{
+    if(b.dataset.range==='custom'){
+      openDateRangePicker((s,e)=>{currentRange='custom';customStart=s;customEnd=e;$$('#reportRange button').forEach(x=>x.classList.toggle('active',x===b));renderCurrent();});
+      return;
+    }
+    currentRange=b.dataset.range;customStart='';customEnd='';$$('#reportRange button').forEach(x=>x.classList.toggle('active',x===b));renderCurrent();
+  });
 }
+
 function exportSalesCSV(rows){
   const head=['订单号','销售时间','客户','商品名称','颜色','数量','销售单价','商品金额','订单优惠','订单应收','本次实收','状态']; const out=[];
   rows.forEach(s=>s.items.forEach(i=>out.push([s.orderNo,fmtDateTime(s.createdAt),s.customerName,i.productName,i.color,i.qty,i.price,n(i.qty)*n(i.price),s.discountAmount,s.finalAmount,s.received,s.status==='active'?'有效':'已撤销'])));
@@ -1433,7 +1595,7 @@ async function runQinsilkImport(){
 
 async function renderMore(){
   setHeader('更多功能','客户、盘点、流水、备份');
-  const items=[['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['shortcut-setup','⚡','iPhone快捷保存','一次设置，原图/视频/店铺图直接进相册'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
+  const items=[['pass-deals','↔','过手差价（测试）','不建商品、不动库存，单独记录同行转差价'],['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['shortcut-setup','⚡','iPhone快捷保存','一次设置，原图/视频/店铺图直接进相册'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
   $('#main').innerHTML=`<div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div><div class="notice warn" style="margin-top:12px">秦丝建议继续作为正式账本；漠翠系统用于玉石专业资料、借调和分析。导入前请先做完整备份。</div>`;
   $$('.more-item').forEach(el=>el.onclick=()=>navigate(el.dataset.route));
 }
@@ -1522,7 +1684,7 @@ async function renderSettings(){
   <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：漠翠经营助手 3.0 内容工作台第一期<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：v3.10-test · 过手差价测试版 · 核心交易/UI稳定基线保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
@@ -1581,7 +1743,7 @@ function hideInitialSyncPill(text='云端数据已更新'){
 }
 async function refreshCurrentPageAfterPull(){
   const modalOpen=Boolean($('#modalRoot .modal-backdrop'));
-  const editing=modalOpen||window.__mocuiProductDirty||appState.route==='sale-new';
+  const editing=modalOpen||window.__mocuiProductDirty||appState.route==='sale-new'||appState.route==='pass-deal-new';
   if(editing)return;
   const routeAtStart=appState.route,paramsAtStart={...appState.params},top=getPageScrollTop();
   await render();enhanceCurrentPage();
@@ -1604,6 +1766,7 @@ function bindPrimaryNavigation(){
     if(document.activeElement&&document.activeElement.matches?.('input, textarea, select, [contenteditable="true"]'))document.activeElement.blur();
     document.body.classList.remove('keyboard-open');
     if(appState.route==='sale-new')syncSaleFormToDraft();
+    if(appState.route==='pass-deal-new')syncPassDealFormToDraft();
     const target=b.dataset.route;
     if(navRouteFor(appState.route)===target&&appState.route===target){
       setPageScrollTop(0,window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth');

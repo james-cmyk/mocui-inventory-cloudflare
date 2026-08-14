@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.9.1-ui-baseline';
+const CACHE='mocui-v3.10-test-passdeal';
 const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.9.1：冻结 UI 稳定基线；Dock / 顶部栏 / 主滚动容器独立保护
+// v3.10-test：新增过手差价测试模块；继续冻结 UI 稳定基线与核心库存交易层
