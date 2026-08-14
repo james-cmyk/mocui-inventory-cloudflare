@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.10.1-test-external-goods';
+const CACHE='mocui-v3.10.2-test-operating-overview';
 const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.10.1-test：修复今日销售日期口径；新增外部同行货/寄售流转测试模块；继续冻结 UI 稳定基线与核心库存交易层
+// v3.10.2-test：首页与报表增加经营总成交额/总毛利润；正式销售、过手差价、外部货保持独立分析；报表移除“明天”，增加“本月/今年”；核心交易层与 UI 稳定基线继续冻结

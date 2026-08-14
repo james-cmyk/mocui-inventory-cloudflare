@@ -316,6 +316,8 @@ function dateRange(key, customStart, customEnd){
   else if(key==='tomorrow'){ const d=new Date(); d.setDate(d.getDate()+1); start=startOfDay(d); end=endOfDay(d); }
   else if(key==='7d'){ start=startOfDay(daysAgo(6)); end=endOfDay(today); }
   else if(key==='30d'){ start=startOfDay(daysAgo(29)); end=endOfDay(today); }
+  else if(key==='month'){ start=new Date(today.getFullYear(),today.getMonth(),1); end=endOfDay(today); }
+  else if(key==='year'){ start=new Date(today.getFullYear(),0,1); end=endOfDay(today); }
   else if(key==='custom'){ start=customStart?startOfDay(customStart):new Date(0); end=customEnd?endOfDay(customEnd):endOfDay(today); }
   else { start=new Date(0); end=new Date(8640000000000000); }
   return {start,end};
@@ -643,27 +645,34 @@ async function render(){
 
 async function renderDashboard(){
   setHeader('漠翠进销存','经营概况');
-  const [products,sales,loans,passDeals]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals()]);
+  const [products,sales,loans,passDeals,externalGoods]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals(),getExternalGoods()]);
   const activeSales=sales.filter(saleIsReportActive);
-  const today=dateRange('today'), monthStart=new Date(new Date().getFullYear(),new Date().getMonth(),1);
+  const today=dateRange('today'),monthRange=dateRange('month');
   const todaySales=activeSales.filter(s=>recordInBusinessRange(s,today,'sale'));
-  const monthRange={start:monthStart,end:endOfDay(new Date())};
   const monthSales=activeSales.filter(s=>recordInBusinessRange(s,monthRange,'sale'));
   const catalogProducts=products.filter(p=>!p.historicalOnly);
   const inventoryQty=catalogProducts.reduce((s,p)=>s+n(p.stock),0);
   const inventoryCost=catalogProducts.reduce((s,p)=>s+n(p.stock)*n(p.costPrice),0);
   const sumAmount=rows=>rows.reduce((s,r)=>s+n(r.finalAmount),0);
   const profit=rows=>rows.reduce((s,r)=>s+saleGrossProfit(r),0);
-  const activePassDeals=passDeals.filter(passDealIsActive),todayPassDeals=activePassDeals.filter(d=>recordInBusinessRange(d,today,'pass'));
-  const todayPassTurnover=todayPassDeals.reduce((a,d)=>a+n(d.saleAmount),0),todayPassProfit=todayPassDeals.reduce((a,d)=>a+passDealProfit(d),0);
+  const activePassDeals=passDeals.filter(passDealIsActive);
+  const todayPassDeals=activePassDeals.filter(d=>recordInBusinessRange(d,today,'pass'));
+  const monthPassDeals=activePassDeals.filter(d=>recordInBusinessRange(d,monthRange,'pass'));
+  const todayExternal=externalSoldRowsForRange(externalGoods,today),monthExternal=externalSoldRowsForRange(externalGoods,monthRange);
+  const passTurnover=rows=>rows.reduce((a,d)=>a+n(d.saleAmount),0),passProfit=rows=>rows.reduce((a,d)=>a+passDealProfit(d),0);
+  const externalTurnover=rows=>rows.reduce((a,d)=>a+n(d.saleAmount),0),externalProfitTotal=rows=>rows.reduce((a,d)=>a+externalProfit(d),0);
+  const todayFormalTurnover=sumAmount(todaySales),todayFormalProfit=profit(todaySales),todayPassTurnover=passTurnover(todayPassDeals),todayPassProfit=passProfit(todayPassDeals),todayExternalTurnover=externalTurnover(todayExternal),todayExternalProfit=externalProfitTotal(todayExternal);
+  const monthFormalTurnover=sumAmount(monthSales),monthFormalProfit=profit(monthSales),monthPassTurnover=passTurnover(monthPassDeals),monthPassProfit=passProfit(monthPassDeals),monthExternalTurnover=externalTurnover(monthExternal),monthExternalProfit=externalProfitTotal(monthExternal);
+  const todayTotalTurnover=todayFormalTurnover+todayPassTurnover+todayExternalTurnover,todayTotalProfit=todayFormalProfit+todayPassProfit+todayExternalProfit;
+  const monthTotalTurnover=monthFormalTurnover+monthPassTurnover+monthExternalTurnover,monthTotalProfit=monthFormalProfit+monthPassProfit+monthExternalProfit;
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
   $('#main').innerHTML=`
     <div class="grid-2">
-      <div class="metric"><div class="label">今日销售额</div><div class="value money">${fmtMoney(sumAmount(todaySales))}</div><div class="hint">${todaySales.length} 笔正式/调借销售 · 过手另计 ${fmtMoney(todayPassTurnover)}</div></div>
-      <div class="metric"><div class="label">今日毛利润</div><div class="value money">${fmtMoney(profit(todaySales))}</div><div class="hint">销售毛利 · 过手利润 ${fmtMoney(todayPassProfit)} · 经营毛利 ${fmtMoney(profit(todaySales)+todayPassProfit)}</div></div>
-      <div class="metric"><div class="label">本月销售额</div><div class="value money">${fmtMoney(sumAmount(monthSales))}</div><div class="hint">${monthSales.length} 笔销售</div></div>
-      <div class="metric"><div class="label">本月毛利润</div><div class="value money">${fmtMoney(profit(monthSales))}</div><div class="hint">已扣订单优惠</div></div>
+      <div class="metric"><div class="label">今日总成交额</div><div class="value money">${fmtMoney(todayTotalTurnover)}</div><div class="hint">正式/调借 ${fmtMoney(todayFormalTurnover)} · 过手 ${fmtMoney(todayPassTurnover)}${todayExternalTurnover?` · 外部货 ${fmtMoney(todayExternalTurnover)}`:''}</div></div>
+      <div class="metric"><div class="label">今日总毛利润</div><div class="value money">${fmtMoney(todayTotalProfit)}</div><div class="hint">正式/调借 ${fmtMoney(todayFormalProfit)} · 过手 ${fmtMoney(todayPassProfit)}${todayExternalProfit?` · 外部货 ${fmtMoney(todayExternalProfit)}`:''}</div></div>
+      <div class="metric"><div class="label">本月总成交额</div><div class="value money">${fmtMoney(monthTotalTurnover)}</div><div class="hint">正式/调借 ${fmtMoney(monthFormalTurnover)} · 过手 ${fmtMoney(monthPassTurnover)}${monthExternalTurnover?` · 外部货 ${fmtMoney(monthExternalTurnover)}`:''}</div></div>
+      <div class="metric"><div class="label">本月总毛利润</div><div class="value money">${fmtMoney(monthTotalProfit)}</div><div class="hint">正式/调借 ${fmtMoney(monthFormalProfit)} · 过手 ${fmtMoney(monthPassProfit)}${monthExternalProfit?` · 外部货 ${fmtMoney(monthExternalProfit)}`:''}</div></div>
     </div>
     <div class="section-title">商品仓库 <small>实时库存</small></div>
     <div class="grid-3">
@@ -677,7 +686,7 @@ async function renderDashboard(){
       <button class="btn block" id="quickSale">销售开单</button><button class="btn secondary block" id="quickProduct">新增商品</button>
       <button class="btn secondary block" id="quickLoan">新增调借</button><button class="btn secondary block" id="quickStocktake">库存盘点</button>
     </div>
-    <button class="btn secondary block" id="quickPassDeal" style="margin-top:10px">过手差价（测试）${todayPassDeals.length?` · 今日 ${todayPassDeals.length}单 / 利润 ${fmtMoney(todayPassDeals.reduce((a,d)=>a+passDealProfit(d),0))}`:''}</button>
+    <button class="btn secondary block" id="quickPassDeal" style="margin-top:10px">过手差价（测试）${todayPassDeals.length?` · 今日 ${todayPassDeals.length}单 · 成交 ${fmtMoney(todayPassTurnover)} · 利润 ${fmtMoney(todayPassProfit)}`:''}</button>
     <button class="content-dashboard-link" id="quickContent"><span><strong>内容工作台</strong><small>今日待发 · 图片视频 · 文案 · 重复曝光</small></span><b>›</b></button>`;
   $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickPassDeal').onclick=()=>navigate('pass-deal-new'); $('#quickContent').onclick=()=>navigate('content');
 }
@@ -1485,10 +1494,10 @@ async function externalReturnToOwner(id,btn){if(!await confirmDialog('确定这�
 function externalSoldRowsForRange(rows,range){return (rows||[]).filter(r=>r.status==='sold'&&recordInBusinessRange({businessDate:r.businessDate,createdAt:r.soldAt||r.createdAt},range,'external'));}
 
 async function renderReports(){
-  setHeader('统计报表','销售、过手差价、利润、客户、商品 · 经营助手');
-  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">销售报表</button><button data-mode="pass">过手差价</button><button data-mode="external">外部货</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="tomorrow">明天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
+  setHeader('统计报表','经营合计、销售、过手、外部货 · 经营助手');
+  $('#main').innerHTML=`<div class="segment report-mode-tabs" id="reportMode"><button data-mode="report" class="active">销售报表</button><button data-mode="pass">过手差价</button><button data-mode="external">外部货</button><button data-mode="assistant">经营助手</button></div><div id="reportRange" class="segment"><button data-range="today">今天</button><button data-range="yesterday">昨天</button><button data-range="7d">7天</button><button data-range="30d" class="active">30天</button><button data-range="month">本月</button><button data-range="year">今年</button><button data-range="all">全部</button><button data-range="custom">自定义</button></div><div id="reportBody"></div>`;
   const draw=async(key='30d',s='',e='')=>{
-    const [sales,products,customers]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers')]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&recordInBusinessRange(x,range,'sale'));
+    const [sales,products,customers,deals,externalGoods]=await Promise.all([dbAll('sales'),dbAll('products'),dbAll('customers'),getPassDeals(),getExternalGoods()]); const range=dateRange(key,s,e); const rows=sales.filter(x=>saleIsReportActive(x)&&recordInBusinessRange(x,range,'sale'));
     const revenue=rows.reduce((a,x)=>a+n(x.finalAmount),0), qty=rows.reduce((a,x)=>a+x.items.reduce((b,i)=>b+n(i.qty),0),0);
     const discount=rows.reduce((a,x)=>a+n(x.discountAmount),0), cost=rows.reduce((a,x)=>a+saleCostTotal(x),0), grossProfit=revenue-cost;
     const received=rows.reduce((a,x)=>a+reportReceivedAmount(x),0), currentReceivableGap=rows.filter(x=>!saleIsHistorical(x)).reduce((a,x)=>a+n(x.finalAmount)-n(x.received),0), historicalCount=rows.filter(saleIsHistorical).length;
@@ -1496,9 +1505,13 @@ async function renderReports(){
     const productMap={}; rows.forEach(x=>x.items.forEach(i=>{if(!productMap[i.productId])productMap[i.productId]={name:i.productName,color:i.color,qty:0,amount:0,profit:0};const net=saleItemNetAmount(x,i),itemCost=n(i.costPrice)*n(i.qty);productMap[i.productId].qty+=n(i.qty);productMap[i.productId].amount+=net;productMap[i.productId].profit+=net-itemCost;}));
     const customerRank=Object.values(customerMap).sort((a,b)=>b.amount-a.amount); const productRank=Object.values(productMap).sort((a,b)=>b.amount-a.amount);
     const catalogProducts=products.filter(p=>!p.historicalOnly),inventoryCost=catalogProducts.reduce((a,p)=>a+n(p.stock)*n(p.costPrice),0), inventoryQty=catalogProducts.reduce((a,p)=>a+n(p.stock),0);
+    const passRows=passDealRowsForRange(deals,range),externalRows=externalSoldRowsForRange(externalGoods,range);
+    const passTurnover=passRows.reduce((a,x)=>a+n(x.saleAmount),0),passProfit=passRows.reduce((a,x)=>a+passDealProfit(x),0),externalTurnover=externalRows.reduce((a,x)=>a+n(x.saleAmount),0),externalProfitTotal=externalRows.reduce((a,x)=>a+externalProfit(x),0);
+    const operatingTurnover=revenue+passTurnover+externalTurnover,operatingProfit=grossProfit+passProfit+externalProfitTotal;
     $('#reportBody').innerHTML=`
-      <div class="notice"><strong>销售口径：</strong>正式商品销售 + 调借售出 + 秦丝历史销售。过手差价不混入这里。</div>
-      <div class="section-title">经营概况</div><div class="grid-2"><div class="metric"><div class="label">销售额</div><div class="value">${fmtMoney(revenue)}</div><div class="hint">${rows.length} 笔订单</div></div><div class="metric"><div class="label">本期实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">${historicalCount?`秦丝历史按成交额计 · `:''}当前应收差额 ${fmtMoney(currentReceivableGap)}</div></div><div class="metric"><div class="label">销售数量</div><div class="value">${fmtInt(qty)}</div><div class="hint">商品件数</div></div><div class="metric"><div class="label">毛利润</div><div class="value">${fmtMoney(grossProfit)}</div><div class="hint">毛利率 ${revenue?((grossProfit/revenue)*100).toFixed(1):0}%</div></div></div>
+      <div class="notice"><strong>统计口径：</strong>上方经营合计 = 正式/调借销售 + 过手差价 + 已售外部货；下面商品、客户、库存排名仍只分析正式商品销售，避免过手和外部货污染库存判断。</div>
+      <div class="section-title">经营合计</div><div class="grid-2"><div class="metric"><div class="label">总成交额</div><div class="value">${fmtMoney(operatingTurnover)}</div><div class="hint">正式/调借 ${fmtMoney(revenue)} · 过手 ${fmtMoney(passTurnover)}${externalTurnover?` · 外部货 ${fmtMoney(externalTurnover)}`:''}</div></div><div class="metric"><div class="label">总毛利润</div><div class="value">${fmtMoney(operatingProfit)}</div><div class="hint">正式/调借 ${fmtMoney(grossProfit)} · 过手 ${fmtMoney(passProfit)}${externalProfitTotal?` · 外部货 ${fmtMoney(externalProfitTotal)}`:''}</div></div></div>
+      <div class="section-title">正式销售概况</div><div class="grid-2"><div class="metric"><div class="label">销售额</div><div class="value">${fmtMoney(revenue)}</div><div class="hint">${rows.length} 笔订单</div></div><div class="metric"><div class="label">本期实收</div><div class="value">${fmtMoney(received)}</div><div class="hint">${historicalCount?`秦丝历史按成交额计 · `:''}当前应收差额 ${fmtMoney(currentReceivableGap)}</div></div><div class="metric"><div class="label">销售数量</div><div class="value">${fmtInt(qty)}</div><div class="hint">商品件数</div></div><div class="metric"><div class="label">毛利润</div><div class="value">${fmtMoney(grossProfit)}</div><div class="hint">毛利率 ${revenue?((grossProfit/revenue)*100).toFixed(1):0}%</div></div></div>
       <div class="section-title">利润分析</div><div class="grid-3"><div class="metric compact"><div class="label">销售成本</div><div class="value">${fmtMoney(cost)}</div></div><div class="metric compact"><div class="label">优惠抹零</div><div class="value">${fmtMoney(discount)}</div></div><div class="metric compact"><div class="label">单均金额</div><div class="value">${fmtMoney(rows.length?revenue/rows.length:0)}</div></div></div>
       <div class="section-title">库存汇总</div><div class="grid-3"><div class="metric compact"><div class="label">商品数量</div><div class="value">${catalogProducts.length}</div></div><div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div></div>
       <div class="section-title">客户分析 / 客户排名 <small>客户总数 ${customers.length} · 本期成交 ${customerRank.filter(x=>x.name!=='散客').length}</small></div>${customerRank.length?`<div class="table-wrap"><table class="table"><thead><tr><th>排名</th><th>客户</th><th>订单</th><th>拿货数</th><th>交易额</th></tr></thead><tbody>${customerRank.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td>${x.orders}</td><td>${fmtInt(x.qty)}</td><td>${fmtMoney(x.amount)}</td></tr>`).join('')}</tbody></table></div>`:emptyState('♙','暂无客户销售数据')}
