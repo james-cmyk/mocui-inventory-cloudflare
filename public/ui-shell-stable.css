@@ -1,0 +1,110 @@
+/*
+ * 漠翠进销存 UI 稳定基线 v3.9.1
+ * 冻结范围：iPhone 主壳层、顶部栏、主滚动容器、五栏 Dock。
+ * 后续分类/报表/经营助手/内容工作台等功能升级默认不得修改本文件。
+ * 如确需修改 Dock / safe-area / 页面滚动结构，应单独做 UI 基线版本并真机回归。
+ */
+
+@media (max-width:759px){
+  html,body{
+    width:100%!important;
+    height:100%!important;
+    min-height:100%!important;
+    overflow:hidden!important;
+    background:#fff!important;
+  }
+  body{
+    margin:0!important;
+    padding:0!important;
+  }
+  #app{
+    position:relative!important;
+    display:flex!important;
+    flex-direction:column!important;
+    width:100%!important;
+    height:100%!important;
+    min-height:100%!important;
+    padding:0!important;
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+    background:var(--bg)!important;
+  }
+  #app>.topbar{
+    position:relative!important;
+    top:auto!important;
+    flex:0 0 auto!important;
+    width:100%!important;
+    transform:none!important;
+  }
+  #app>#main.main{
+    position:relative!important;
+    flex:1 1 auto!important;
+    min-height:0!important;
+    width:100%!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch;
+    overscroll-behavior-y:contain;
+  }
+  #app>.bottom-nav,
+  body.dock-js-fixed #app>.bottom-nav{
+    position:relative!important;
+    inset:auto!important;
+    top:auto!important;
+    right:auto!important;
+    bottom:auto!important;
+    left:auto!important;
+    display:grid!important;
+    grid-template-columns:repeat(5,minmax(0,1fr))!important;
+    flex:0 0 78px!important;
+    width:100%!important;
+    height:78px!important;
+    min-height:78px!important;
+    max-height:78px!important;
+    max-width:none!important;
+    margin:0!important;
+    padding:6px 8px 8px!important;
+    transform:none!important;
+    box-sizing:border-box!important;
+    overflow:visible!important;
+    background:#fff!important;
+    border-top:1px solid rgba(228,231,236,.92)!important;
+  }
+  #app>.bottom-nav>.nav-item{
+    display:flex!important;
+    flex-direction:column!important;
+    align-items:center!important;
+    justify-content:center!important;
+    min-width:0!important;
+    min-height:62px!important;
+    margin:0!important;
+    padding:3px 0 2px!important;
+    gap:4px!important;
+    overflow:visible!important;
+    visibility:visible!important;
+  }
+  #app>.bottom-nav>.nav-item>span{
+    display:grid!important;
+    place-items:center!important;
+    flex:0 0 28px!important;
+    width:28px!important;
+    height:28px!important;
+  }
+  #app>.bottom-nav>.nav-item>b{
+    display:block!important;
+    flex:0 0 auto!important;
+    visibility:visible!important;
+    opacity:1!important;
+    height:auto!important;
+    min-height:14px!important;
+    line-height:14px!important;
+    font-size:11px!important;
+    font-weight:700!important;
+    white-space:nowrap!important;
+  }
+  body.keyboard-open #app>.bottom-nav{
+    opacity:0!important;
+    visibility:hidden!important;
+    pointer-events:none!important;
+  }
+}

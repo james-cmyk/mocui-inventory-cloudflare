@@ -1,5 +1,5 @@
-const CACHE='mocui-v3.9-core-stability';
-const CORE=['./','./index.html','./offline.html','./app.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.9.1-ui-baseline';
+const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.9：冻结核心交易层；销售/商品/调借/归还/盘点增加防重复与核心自检
+// v3.9.1：冻结 UI 稳定基线；Dock / 顶部栏 / 主滚动容器独立保护
