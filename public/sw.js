@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.10.2-test-operating-overview';
+const CACHE='mocui-v3.11.0-safe-workflow';
 const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -46,4 +46,4 @@ self.addEventListener('fetch',event=>{
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.10.2-test：首页与报表增加经营总成交额/总毛利润；正式销售、过手差价、外部货保持独立分析；报表移除“明天”，增加“本月/今年”；核心交易层与 UI 稳定基线继续冻结
+// v3.11.0：过手差价转正式；新增安全版调货货源库（待确认来源、同行名称管理、软归档保留R2原图）；首页/更多页动线重排；核心交易层与UI稳定基线继续冻结

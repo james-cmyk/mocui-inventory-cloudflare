@@ -4,7 +4,7 @@ const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
 const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans'};
+const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans','trade-gallery':'more'};
 let db;
 let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, passDealDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
@@ -542,7 +542,38 @@ function productListItem(p,categories=[]){
   return `<div class="list-item clickable" data-product-id="${p.id}">${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">${esc(p.code)} · ${esc(categoryPathLabel(p.category,categories))} · ${esc(p.color||'未填写颜色')}</div><div class="item-meta">成本 ${fmtMoney(p.costPrice)}　售价 ${fmtMoney(p.salePrice)}</div></div><div class="item-right"><span class="badge ${n(p.stock)<=0?'danger':n(p.stock)<=1?'warn':'success'}">库存 ${fmtInt(p.stock)}</span></div></div>`;
 }
 
+function ensureWorkflowUxStyles(){
+  if(document.getElementById('workflowUxStyles'))return;
+  const style=document.createElement('style');style.id='workflowUxStyles';
+  style.textContent=`
+    .workflow-section{margin-top:18px}
+    .workflow-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .workflow-card{appearance:none;border:1px solid #e4e7ec;background:#fff;border-radius:14px;padding:14px;text-align:left;min-height:92px;display:flex;flex-direction:column;justify-content:space-between;gap:10px;color:inherit;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+    .workflow-card:active{transform:scale(.99)}
+    .workflow-card.primary{background:#101828;color:#fff;border-color:#101828}
+    .workflow-card.warn{background:#fffaf0;border-color:#f3d7a3}
+    .workflow-title{font-size:16px;font-weight:800;line-height:1.25}
+    .workflow-meta{font-size:12px;line-height:1.45;color:#667085}
+    .workflow-card.primary .workflow-meta{color:rgba(255,255,255,.72)}
+    .workflow-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;font-weight:700}
+    .workflow-badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 7px;background:#fff1f0;color:#b42318;font-size:11px;font-weight:800}
+    .more-group{margin-bottom:18px}
+    .more-group-title{font-size:13px;font-weight:800;color:#667085;margin:0 4px 8px}
+    .more-group .list{overflow:hidden}
+    .trade-gallery-photo.pending-source{border-color:#f3c969!important}
+    .trade-gallery-photo.archived{opacity:.72}
+    .trade-gallery-photo .source-tag{position:absolute;left:7px;top:7px;max-width:78%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:rgba(16,24,40,.82);color:#fff;padding:4px 7px;border-radius:7px;font-size:11px;font-weight:700}
+    .trade-gallery-photo.pending-source .source-tag{background:#b54708}
+    .trade-gallery-photo .archive-tag{position:absolute;right:7px;top:7px;background:rgba(71,84,103,.9);color:#fff;padding:4px 7px;border-radius:7px;font-size:10px;font-weight:800}
+    .source-pending-row{display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border-radius:12px;background:#fffaf0;border:1px solid #f3d7a3;margin-top:8px}
+    .source-pending-row input{margin-top:2px;width:18px;height:18px}
+    @media (min-width:760px){.workflow-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.workflow-card{min-height:104px}}
+  `;
+  document.head.appendChild(style);
+}
+
 function enhanceCurrentPage(){
+  ensureWorkflowUxStyles();
   $$('#main input[type="number"]').forEach(input=>{
     if(!input.hasAttribute('inputmode')) input.setAttribute('inputmode','decimal');
   });
@@ -637,15 +668,15 @@ async function render(){
   const routes={
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
-    'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew, 'external-goods':renderExternalGoods,
+    'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew, 'external-goods':renderExternalGoods, 'trade-gallery':renderTradeGallery,
     more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
 }
 
 async function renderDashboard(){
-  setHeader('漠翠进销存','经营概况');
-  const [products,sales,loans,passDeals,externalGoods]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals(),getExternalGoods()]);
+  setHeader('漠翠进销存','经营概况 · 高频操作优先');
+  const [products,sales,loans,passDeals,externalGoods,tradeGallery]=await Promise.all([dbAll('products'),dbAll('sales'),dbAll('loans'),getPassDeals(),getExternalGoods(),getTradeGalleryLedger()]);
   const activeSales=sales.filter(saleIsReportActive);
   const today=dateRange('today'),monthRange=dateRange('month');
   const todaySales=activeSales.filter(s=>recordInBusinessRange(s,today,'sale'));
@@ -667,6 +698,8 @@ async function renderDashboard(){
   const monthTotalTurnover=monthFormalTurnover+monthPassTurnover+monthExternalTurnover,monthTotalProfit=monthFormalProfit+monthPassProfit+monthExternalProfit;
   const overdue=loans.filter(l=>loanOverdueDays(l)>0);
   const dueSoon=loans.filter(l=>loanIsOpen(l)&&loanDaysToDue(l)>=0&&loanDaysToDue(l)<=7);
+  const galleryRows=tradeGalleryFlatRows(tradeGallery).filter(({item})=>tradeGalleryItemIsActive(item));
+  const pendingGallery=galleryRows.filter(({batch})=>tradeGalleryBatchPending(batch));
   $('#main').innerHTML=`
     <div class="grid-2">
       <div class="metric"><div class="label">今日总成交额</div><div class="value money">${fmtMoney(todayTotalTurnover)}</div><div class="hint">正式/调借 ${fmtMoney(todayFormalTurnover)} · 过手 ${fmtMoney(todayPassTurnover)}${todayExternalTurnover?` · 外部货 ${fmtMoney(todayExternalTurnover)}`:''}</div></div>
@@ -674,21 +707,33 @@ async function renderDashboard(){
       <div class="metric"><div class="label">本月总成交额</div><div class="value money">${fmtMoney(monthTotalTurnover)}</div><div class="hint">正式/调借 ${fmtMoney(monthFormalTurnover)} · 过手 ${fmtMoney(monthPassTurnover)}${monthExternalTurnover?` · 外部货 ${fmtMoney(monthExternalTurnover)}`:''}</div></div>
       <div class="metric"><div class="label">本月总毛利润</div><div class="value money">${fmtMoney(monthTotalProfit)}</div><div class="hint">正式/调借 ${fmtMoney(monthFormalProfit)} · 过手 ${fmtMoney(monthPassProfit)}${monthExternalProfit?` · 外部货 ${fmtMoney(monthExternalProfit)}`:''}</div></div>
     </div>
+    ${(overdue.length||dueSoon.length)?`<div class="section-title ${overdue.length?'danger-text':''}">调借到期提醒 <small>${overdue.length} 单超期 · ${dueSoon.length} 单7天内到期</small></div><div class="list">${[...overdue,...dueSoon.filter(x=>!overdue.includes(x))].slice(0,6).map(loanListItem).join('')}</div>`:''}
+    <div class="workflow-section"><div class="section-title">常用操作 <small>按实际使用频率排列</small></div><div class="workflow-grid">
+      <button class="workflow-card primary" id="quickSale"><span class="workflow-title">销售开单</span><span class="workflow-meta">正式库存销售 · 自动计利润</span><span class="workflow-foot">开始开单 <b>›</b></span></button>
+      <button class="workflow-card" id="quickProduct"><span class="workflow-title">新增商品</span><span class="workflow-meta">自己的货进入正式商品库</span><span class="workflow-foot">建商品 <b>›</b></span></button>
+      <button class="workflow-card" id="quickLoan"><span class="workflow-title">新增调借</span><span class="workflow-meta">借入 / 借出正式商品</span><span class="workflow-foot">调借登记 <b>›</b></span></button>
+      <button class="workflow-card" id="quickPassDeal"><span class="workflow-title">过手差价</span><span class="workflow-meta">不建商品 · 不动库存${todayPassDeals.length?` · 今日 ${todayPassDeals.length}单`:''}</span><span class="workflow-foot">记一笔差价 <b>›</b></span></button>
+    </div></div>
+    <div class="workflow-section"><div class="section-title">同行货与临时货 <small>与自有库存隔离</small></div><div class="workflow-grid">
+      <button class="workflow-card ${pendingGallery.length?'warn':''}" id="quickTradeGallery"><span class="workflow-title">调货货源库</span><span class="workflow-meta">同行图片 ${galleryRows.length} 张${pendingGallery.length?` · ${pendingGallery.length} 张待补来源`:''}</span><span class="workflow-foot">看货源 ${pendingGallery.length?`<span class="workflow-badge">待补 ${pendingGallery.length}</span>`:'<b>›</b>'}</span></button>
+      <button class="workflow-card" id="quickExternalGoods"><span class="workflow-title">外部同行货</span><span class="workflow-meta">别人货临时在你这里流转 / 寄售</span><span class="workflow-foot">查看流转 <b>›</b></span></button>
+      <button class="workflow-card" id="quickStocktake"><span class="workflow-title">库存盘点</span><span class="workflow-meta">只处理正式商品库存差异</span><span class="workflow-foot">开始盘点 <b>›</b></span></button>
+      <button class="workflow-card" id="quickContent"><span class="workflow-title">内容工作台</span><span class="workflow-meta">今日待发 · 图片视频 · 文案记录</span><span class="workflow-foot">进入内容 <b>›</b></span></button>
+    </div></div>
     <div class="section-title">商品仓库 <small>实时库存</small></div>
     <div class="grid-3">
       <div class="metric compact"><div class="label">商品数量</div><div class="value">${catalogProducts.length}</div></div>
       <div class="metric compact"><div class="label">库存总数</div><div class="value">${fmtInt(inventoryQty)}</div></div>
       <div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(inventoryCost)}</div></div>
-    </div>
-    ${(overdue.length||dueSoon.length)?`<div class="section-title ${overdue.length?'danger-text':''}">调借到期提醒 <small>${overdue.length} 单超期 · ${dueSoon.length} 单7天内到期</small></div><div class="list">${[...overdue,...dueSoon.filter(x=>!overdue.includes(x))].slice(0,6).map(loanListItem).join('')}</div>`:''}
-    <div class="section-title">快捷操作</div>
-    <div class="grid-2">
-      <button class="btn block" id="quickSale">销售开单</button><button class="btn secondary block" id="quickProduct">新增商品</button>
-      <button class="btn secondary block" id="quickLoan">新增调借</button><button class="btn secondary block" id="quickStocktake">库存盘点</button>
-    </div>
-    <button class="btn secondary block" id="quickPassDeal" style="margin-top:10px">过手差价（测试）${todayPassDeals.length?` · 今日 ${todayPassDeals.length}单 · 成交 ${fmtMoney(todayPassTurnover)} · 利润 ${fmtMoney(todayPassProfit)}`:''}</button>
-    <button class="content-dashboard-link" id="quickContent"><span><strong>内容工作台</strong><small>今日待发 · 图片视频 · 文案 · 重复曝光</small></span><b>›</b></button>`;
-  $('#quickSale').onclick=()=>navigate('sale-new'); $('#quickProduct').onclick=()=>openProductForm(); $('#quickLoan').onclick=()=>openLoanForm(); $('#quickStocktake').onclick=()=>navigate('stocktake'); $('#quickPassDeal').onclick=()=>navigate('pass-deal-new'); $('#quickContent').onclick=()=>navigate('content');
+    </div>`;
+  $('#quickSale').onclick=()=>navigate('sale-new');
+  $('#quickProduct').onclick=()=>openProductForm();
+  $('#quickLoan').onclick=()=>openLoanForm();
+  $('#quickPassDeal').onclick=()=>navigate('pass-deal-new');
+  $('#quickTradeGallery').onclick=()=>navigate('trade-gallery');
+  $('#quickExternalGoods').onclick=()=>navigate('external-goods');
+  $('#quickStocktake').onclick=()=>navigate('stocktake');
+  $('#quickContent').onclick=()=>navigate('content');
 }
 
 function categoryPickerRowsHTML(categories,selectedId='',expandedRoots=new Set(),query='',allowAll=true){
@@ -1219,7 +1264,7 @@ function analyticsMonthKey(value){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 function analyticsMonthLabel(key){const [y,m]=String(key||'').split('-');return y&&m?`${y}年${n(m)}月`:key||'';}
-// ===== 过手差价（测试模块） =====
+// ===== 过手差价（正式模块） =====
 // 独立业务账：不创建商品、不修改商品库存、不写 stockMoves；只记录成交、成本、收付款和差价利润。
 const PASS_DEAL_PENDING_KEY='mocui_pass_deal_pending_v1';
 const PASS_DEAL_LEDGER_ID='passDealsLedgerV1';
@@ -1260,7 +1305,7 @@ function passDealSummaryHTML(d){
   return `<div class="total-box"><div class="total-row"><span>成交额</span><strong>${fmtMoney(sale)}</strong></div><div class="total-row"><span>成本 / 应付货主</span><strong>${fmtMoney(cost)}</strong></div><div class="total-row"><span>实收 / 已付货主</span><strong>${fmtMoney(received)} / ${fmtMoney(paid)}</strong></div><div class="total-row grand"><span>差价利润</span><strong>${fmtMoney(profit)}</strong></div></div>`;
 }
 async function renderPassDealNew(){
-  setHeader('过手差价（测试）','不建商品 · 不动库存 · 独立记差价');
+  setHeader('过手差价','不建商品 · 不动库存 · 独立记差价');
   if(!appState.passDealDraft){
     const pending=loadLocalDraft(PASS_DEAL_PENDING_KEY);
     appState.passDealDraft=pending&&typeof pending==='object'?{...passDealNewDraft(),...pending}:passDealNewDraft();
@@ -1268,7 +1313,7 @@ async function renderPassDealNew(){
   const d=appState.passDealDraft,[customers,loans]=await Promise.all([dbAll('customers'),dbAll('loans')]);
   const people=[...new Set([...customers.map(c=>c.name),...loans.map(l=>l.person)].map(x=>String(x||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
   $('#main').innerHTML=`
-    <div class="notice warn"><strong>测试模块 · 已加入保护区</strong><br>不会进入商品库、不会扣减库存、不会写库存流水，也不会混入普通商品销售排行。保存时使用按钮锁 + 固定业务ID，异常重试不会重复生成过手单。</div>
+    <div class="notice warn"><strong>正式功能 · 已加入保护区</strong><br>不会进入商品库、不会扣减库存、不会写库存流水，也不会混入普通商品销售排行。保存时使用按钮锁 + 固定业务ID，异常重试不会重复生成过手单。</div>
     <form id="passDealForm" autocomplete="off">
       <div class="form-group"><label class="form-label">货品描述 *</label><input id="passDealItem" class="input" value="${esc(d.itemName)}" placeholder="如：碧玉手镯 56圈" required></div>
       <div class="form-row"><div class="form-group"><label class="form-label">数量</label><input id="passDealQty" class="input" type="number" min="0.01" step="0.01" value="${esc(d.qty||1)}"></div><div class="form-group"><label class="form-label">成交时间</label><input id="passDealDate" class="input" type="datetime-local" value="${esc(d.createdAt||localInputDateTime())}"></div></div>
@@ -1686,10 +1731,189 @@ async function runQinsilkImport(){
   await writeAudit('qinsilk.import','system',batch,`秦丝导入：新增${result.created} 更新${result.updated} 跳过${result.skipped}`,null,result);try{await CloudSync.push();}catch(_){showToast('本机导入完成，云端稍后重试');}appState.qinsilkLastResult=result;showQinsilkResult(result);button.textContent='已完成导入';setTimeout(()=>progress.classList.add('hidden'),500);showToast('秦丝数据导入完成');
 }
 
+// ===== 调货货源库（安全试用模块） =====
+// 只保存“来源同行 / 货源时间 / 价格 / 图片元数据”；图片继续使用既有 Cloudflare R2 媒体接口。
+// 明确隔离：不创建商品、不修改库存、不写销售/调借/库存流水。
+// 删除改为“归档”，R2 原图不做硬删除，避免误删历史货源。
+const TRADE_GALLERY_LEDGER_ID='tradeGalleryLedgerV1';
+const TRADE_GALLERY_DEALERS_ID='tradeGalleryDealersV1';
+function tradeGalleryGuardOk(){
+  const fns=[commitTradeGalleryBatch,saveTradeGalleryItemEdit,deleteTradeGalleryItem,restoreTradeGalleryItem];
+  const code=fns.map(fn=>fn.toString()).join('\n');
+  return !/adjustStock\s*\(|stockMoves|dbPut\(\s*["'](?:products|sales|loans|stocktakes)["']/.test(code);
+}
+async function getTradeGalleryLedger(){
+  const row=await dbGet('settings',TRADE_GALLERY_LEDGER_ID);
+  return {id:TRADE_GALLERY_LEDGER_ID,batches:Array.isArray(row?.batches)?row.batches:[],createdAt:row?.createdAt||nowISO(),updatedAt:row?.updatedAt||nowISO()};
+}
+async function putTradeGalleryLedger(ledger){ledger.id=TRADE_GALLERY_LEDGER_ID;ledger.updatedAt=nowISO();await dbPut('settings',ledger);return ledger;}
+async function getTradeGalleryDealerDirectory(){
+  const row=await dbGet('settings',TRADE_GALLERY_DEALERS_ID);
+  return {id:TRADE_GALLERY_DEALERS_ID,dealers:Array.isArray(row?.dealers)?row.dealers:[],createdAt:row?.createdAt||nowISO(),updatedAt:row?.updatedAt||nowISO()};
+}
+async function putTradeGalleryDealerDirectory(row){row.id=TRADE_GALLERY_DEALERS_ID;row.updatedAt=nowISO();await dbPut('settings',row);return row;}
+async function rememberTradeGalleryDealer(name){
+  const clean=String(name||'').trim();if(!clean)return;
+  const row=await getTradeGalleryDealerDirectory();if(row.dealers.some(x=>String(x.name||'').trim()===clean))return;
+  row.dealers.push({id:uid('dealer'),name:clean,createdAt:nowISO(),updatedAt:nowISO()});await putTradeGalleryDealerDirectory(row);
+}
+async function tradeGalleryApi(path,options={}){
+  const res=await fetch(path,{credentials:'same-origin',...options});
+  const type=res.headers.get('content-type')||'';
+  const body=type.includes('application/json')?await res.json().catch(()=>({})):await res.text();
+  if(!res.ok)throw new Error(body?.error||body||`请求失败 ${res.status}`);
+  return body;
+}
+function tradeGalleryMime(file){
+  const direct=String(file?.type||'').toLowerCase();if(direct.startsWith('image/'))return direct;
+  const ext=String(file?.name||'').split('.').pop().toLowerCase();return ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',heic:'image/heic',heif:'image/heif'})[ext]||'';
+}
+async function uploadTradeGalleryImage(file,batchId){
+  const mime=tradeGalleryMime(file);if(!mime)throw new Error(`${file?.name||'文件'} 不是支持的图片`);
+  if(n(file.size)>25*1024*1024)throw new Error(`${file.name} 超过单张25MB限制`);
+  return tradeGalleryApi('/api/media/upload',{method:'POST',headers:{'content-type':mime,'x-product-id':`trade-${batchId}`.slice(0,80)},body:file});
+}
+function tradeGalleryDateLabel(value){const d=new Date(value);if(Number.isNaN(d.getTime()))return '-';return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function tradeGalleryPriceText(value){return value===''||value===null||value===undefined?'未录价格':fmtMoney(value);}
+function tradeGalleryBatchPending(batch){return Boolean(batch?.sourcePending)||!String(batch?.dealerName||'').trim();}
+function tradeGalleryDealerLabel(batch){return tradeGalleryBatchPending(batch)?'待确认来源':String(batch?.dealerName||'').trim();}
+function tradeGalleryItemIsActive(item){return String(item?.status||'active')!=='archived';}
+function tradeGalleryFlatRows(ledger){
+  const out=[];(ledger.batches||[]).forEach(batch=>(batch.items||[]).forEach(item=>out.push({batch,item})));
+  return out.sort((a,b)=>new Date(b.batch.receivedAt||b.batch.createdAt)-new Date(a.batch.receivedAt||a.batch.createdAt));
+}
+function tradeGalleryCard(row){
+  const {batch,item}=row,pending=tradeGalleryBatchPending(batch),active=tradeGalleryItemIsActive(item),dealer=tradeGalleryDealerLabel(batch);
+  return `<button type="button" class="card trade-gallery-photo ${pending?'pending-source':''} ${active?'':'archived'}" data-gallery-batch="${esc(batch.id)}" data-gallery-item="${esc(item.id)}" style="padding:0;overflow:hidden;text-align:left;border:1px solid #e3e7ee;background:#fff;position:relative">
+    <div style="position:relative;aspect-ratio:1/1;background:#eef1f5;overflow:hidden"><img src="${esc(item.url)}" alt="调货图片" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block"><span class="source-tag">${esc(dealer)}</span>${active?'':'<span class="archive-tag">已归档</span>'}</div>
+    <div style="padding:9px 10px 10px"><div style="font-size:13px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(item.itemName||'未命名货品')}</div><div style="font-size:13px;font-weight:800;margin-top:4px">${esc(tradeGalleryPriceText(item.price))}</div><div class="item-meta" style="margin-top:3px">货源 ${esc(tradeGalleryDateLabel(batch.receivedAt))}</div></div>
+  </button>`;
+}
+async function renderTradeGallery(){
+  setHeader('调货货源库（试用）','同行来源 · 货源时间 · 报价 · 原图归档',{label:'＋',onClick:()=>openTradeGalleryBatchForm()});
+  if(!tradeGalleryGuardOk()){$('#main').innerHTML='<div class="notice danger"><strong>货源库保护检查未通过</strong><br>为避免影响正式商品、库存和销售，本模块已停止写入。其他核心业务不受影响。</div>';return;}
+  const ledger=await getTradeGalleryLedger(),rows=tradeGalleryFlatRows(ledger),activeRows=rows.filter(({item})=>tradeGalleryItemIsActive(item)),pendingRows=activeRows.filter(({batch})=>tradeGalleryBatchPending(batch));
+  const dealers=[...new Set((ledger.batches||[]).filter(x=>!tradeGalleryBatchPending(x)).map(x=>String(x.dealerName||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const now=Date.now(),recent30=activeRows.filter(r=>now-new Date(r.batch.receivedAt||r.batch.createdAt).getTime()<=30*86400000).length;
+  $('#main').innerHTML=`<div class="notice"><strong>这不是库存。</strong>这里保存同行发来的调货图、你拍的别人家货和报价记录。忘记同行名字时可以先放进“待确认来源”，后面再补；归档不会删除 R2 原图，也不会进入商品、库存、销售或调借。</div>
+    <div class="grid-3" style="margin-top:10px"><div class="metric compact"><div class="label">在用图片</div><div class="value">${activeRows.length}</div></div><div class="metric compact"><div class="label">待补来源</div><div class="value ${pendingRows.length?'danger-text':''}">${pendingRows.length}</div></div><div class="metric compact"><div class="label">近30天</div><div class="value">${recent30}</div></div></div>
+    <div class="btn-row" style="margin-top:10px"><button id="manageTradeGalleryDealers" class="btn secondary small">管理同行名称</button></div>
+    <div class="segment" id="tradeGalleryStatus" style="margin-top:10px"><button data-status="active" class="active">在用</button><button data-status="pending">待确认${pendingRows.length?` ${pendingRows.length}`:''}</button><button data-status="archived">已归档</button><button data-status="all">全部</button></div>
+    <div class="toolbar" style="margin-top:12px"><div class="search"><input id="tradeGallerySearch" placeholder="搜同行、货品名、价格、备注"></div></div>
+    <div class="form-row" style="margin-top:8px"><select id="tradeGalleryDealer" class="select"><option value="">全部同行</option>${dealers.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select><select id="tradeGalleryRange" class="select"><option value="all">全部时间</option><option value="today">今天</option><option value="7d">近7天</option><option value="30d">近30天</option></select></div>
+    <div id="tradeGalleryGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px"></div>`;
+  let statusMode='active';
+  const draw=()=>{
+    const q=$('#tradeGallerySearch').value.trim().toLowerCase(),dealer=$('#tradeGalleryDealer').value,range=$('#tradeGalleryRange').value,today=startOfDay(new Date()).getTime();
+    const filtered=rows.filter(({batch,item})=>{
+      const active=tradeGalleryItemIsActive(item),pending=tradeGalleryBatchPending(batch);
+      if(statusMode==='active'&&!active)return false;if(statusMode==='pending'&&(!active||!pending))return false;if(statusMode==='archived'&&active)return false;
+      if(dealer&&batch.dealerName!==dealer)return false;
+      const t=new Date(batch.receivedAt||batch.createdAt).getTime();if(range==='today'&&t<today)return false;if(range==='7d'&&Date.now()-t>7*86400000)return false;if(range==='30d'&&Date.now()-t>30*86400000)return false;
+      if(!q)return true;return [tradeGalleryDealerLabel(batch),batch.note,item.itemName,item.note,item.price,item.originalName].some(v=>String(v??'').toLowerCase().includes(q));
+    });
+    $('#tradeGalleryGrid').innerHTML=filtered.length?filtered.map(tradeGalleryCard).join(''):emptyState('▧','没有匹配的货源图片','点右上角＋新建一批');
+    $$('.trade-gallery-photo').forEach(el=>el.onclick=()=>openTradeGalleryItemDetail(el.dataset.galleryBatch,el.dataset.galleryItem));
+  };
+  $$('#tradeGalleryStatus button').forEach(btn=>btn.onclick=()=>{$$('#tradeGalleryStatus button').forEach(x=>x.classList.remove('active'));btn.classList.add('active');statusMode=btn.dataset.status;draw();});
+  $('#tradeGallerySearch').oninput=draw;$('#tradeGalleryDealer').onchange=draw;$('#tradeGalleryRange').onchange=draw;$('#manageTradeGalleryDealers').onclick=()=>openTradeGalleryDealerManager();draw();
+}
+async function tradeGalleryDealerSuggestions(){
+  const [ledger,directory,loans,external]=await Promise.all([getTradeGalleryLedger(),getTradeGalleryDealerDirectory(),dbAll('loans'),getExternalGoods()]);
+  const names=[...directory.dealers.map(x=>x.name),...(ledger.batches||[]).filter(x=>!tradeGalleryBatchPending(x)).map(x=>x.dealerName),...loans.map(x=>x.person),...external.map(x=>x.ownerName)];
+  return [...new Set(names.map(x=>String(x||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+}
+async function openTradeGalleryDealerManager(){
+  const directory=await getTradeGalleryDealerDirectory();
+  openModal('同行名称管理',`<form id="tradeGalleryDealerForm"><div class="notice">这里保存常用同行名称，方便上传时直接选择。删除名称只会移出常用列表，<strong>不会修改历史图片，也不会删除任何数据。</strong></div><div class="form-row"><input id="newTradeGalleryDealer" class="input" placeholder="输入同行名称" required><button class="btn" type="submit">添加</button></div></form><div id="tradeGalleryDealerList" class="list" style="margin-top:12px"></div>`,{onOpen:()=>{
+    const draw=()=>{$('#tradeGalleryDealerList').innerHTML=directory.dealers.length?directory.dealers.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-CN')).map(x=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(x.name)}</div><div class="item-meta">常用同行名称</div></div><button type="button" class="btn secondary small forget-gallery-dealer" data-id="${esc(x.id)}">移出</button></div>`).join(''):emptyState('♙','还没有保存常用同行');$$('.forget-gallery-dealer').forEach(btn=>btn.onclick=async()=>{directory.dealers=directory.dealers.filter(x=>x.id!==btn.dataset.id);await putTradeGalleryDealerDirectory(directory);draw();});};
+    $('#tradeGalleryDealerForm').onsubmit=async e=>{e.preventDefault();const name=$('#newTradeGalleryDealer').value.trim();if(!name)return;if(!directory.dealers.some(x=>String(x.name).trim()===name))directory.dealers.push({id:uid('dealer'),name,createdAt:nowISO(),updatedAt:nowISO()});await putTradeGalleryDealerDirectory(directory);$('#newTradeGalleryDealer').value='';draw();showToast('同行名称已保存');};draw();
+  }});
+}
+async function openTradeGalleryBatchForm(){
+  if(!tradeGalleryGuardOk()){showToast('货源库保护检查未通过，已禁止新增');return;}
+  const dealerNames=await tradeGalleryDealerSuggestions(),draft={id:uid('gallery'),dealerName:'',sourcePending:false,receivedAt:localInputDateTime(),note:'',items:[]};
+  openModal('新增调货货源',`<form id="tradeGalleryBatchForm" autocomplete="off"><div class="notice warn"><strong>来源最好先选同行。</strong>如果现在确实记不起来，可以勾选“暂时不知道”，系统会放进待确认来源，首页也会提醒你补。</div>
+    <div class="form-group"><label class="form-label">同行名称</label><input id="tradeGalleryDealerName" class="input" list="tradeGalleryDealerNames" placeholder="例如：海霞玉器"><datalist id="tradeGalleryDealerNames">${dealerNames.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist><label class="source-pending-row"><input id="tradeGallerySourcePending" type="checkbox"><span><strong>暂时不知道来源</strong><br><small>先保存图片，之后再补同行名称，不会因为忘记名字丢图。</small></span></label></div>
+    <div class="form-row"><div class="form-group"><label class="form-label">货源 / 收到时间 *</label><input id="tradeGalleryReceivedAt" class="input" type="datetime-local" value="${esc(draft.receivedAt)}" required><div class="field-help">系统会另外保留实际上传时间。</div></div><div class="form-group"><label class="form-label">批次备注</label><input id="tradeGalleryBatchNote" class="input" placeholder="例如：微信发图 / 市场拍摄"></div></div>
+    <div class="form-group"><label class="form-label">调货图片</label><label class="upload-box" for="tradeGalleryFiles"><strong>＋ 从相册选择图片</strong><br><small>一次最多 30 张；同一批默认属于同一个来源同行</small></label><input id="tradeGalleryFiles" class="hidden" type="file" accept="image/*" multiple><div id="tradeGalleryUploadMeta" class="item-meta" style="margin-top:7px">尚未选择图片</div></div>
+    <div id="tradeGalleryDraftItems"></div><div id="tradeGallerySaveStatus" class="item-meta" style="margin:8px 0"></div><button id="saveTradeGalleryBatch" class="btn block" type="submit" disabled>保存这批货源图片</button></form>`,{full:true,onOpen:()=>{
+      const revoke=()=>draft.items.forEach(x=>{if(x.preview)URL.revokeObjectURL(x.preview);});
+      const pendingBox=$('#tradeGallerySourcePending'),dealerInput=$('#tradeGalleryDealerName');
+      const syncPending=()=>{draft.sourcePending=pendingBox.checked;dealerInput.disabled=draft.sourcePending;dealerInput.placeholder=draft.sourcePending?'稍后补同行名称':'例如：海霞玉器';};pendingBox.onchange=syncPending;syncPending();
+      const renderDraft=()=>{$('#tradeGalleryUploadMeta').textContent=`已选 ${draft.items.length}/30 张`;$('#tradeGalleryDraftItems').innerHTML=draft.items.map((x,i)=>`<div class="card" data-gallery-draft="${i}" style="display:grid;grid-template-columns:82px 1fr;gap:10px;padding:10px;margin-bottom:8px"><img src="${esc(x.preview)}" alt="" style="width:82px;height:82px;object-fit:cover;border-radius:10px"><div><div class="form-row"><input class="input gallery-draft-name" placeholder="货品/图片名称（可选）" value="${esc(x.itemName)}"><input class="input gallery-draft-price" type="number" min="0" step="0.01" placeholder="调货价（可选）" value="${esc(x.price)}"></div><div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px"><span class="item-meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.file.name)}</span><button class="btn danger small remove-gallery-draft" type="button" data-index="${i}">删除</button></div></div></div>`).join('');
+        $$('.remove-gallery-draft').forEach(btn=>btn.onclick=()=>{const idx=n(btn.dataset.index),x=draft.items[idx];if(x?.preview)URL.revokeObjectURL(x.preview);draft.items.splice(idx,1);renderDraft();});
+        $('#saveTradeGalleryBatch').disabled=!draft.items.length;
+      };
+      $('#tradeGalleryFiles').onchange=e=>{const files=[...e.target.files],room=Math.max(0,30-draft.items.length);for(const file of files.slice(0,room)){if(!tradeGalleryMime(file))continue;draft.items.push({id:uid('gallery_img'),file,preview:URL.createObjectURL(file),itemName:'',price:'',note:''});}if(files.length>room)showToast(`本批最多30张，只加入前${room}张`);e.target.value='';renderDraft();};
+      $('#tradeGalleryBatchForm').onsubmit=async e=>{e.preventDefault();draft.sourcePending=$('#tradeGallerySourcePending').checked;draft.dealerName=draft.sourcePending?'':$('#tradeGalleryDealerName').value.trim();draft.receivedAt=$('#tradeGalleryReceivedAt').value;draft.note=$('#tradeGalleryBatchNote').value.trim();$$('[data-gallery-draft]').forEach(el=>{const x=draft.items[n(el.dataset.galleryDraft)];x.itemName=$('.gallery-draft-name',el).value.trim();x.price=$('.gallery-draft-price',el).value;});if(!draft.sourcePending&&!draft.dealerName){showToast('请填写同行名称，或选择“暂时不知道来源”');return;}if(!draft.receivedAt){showToast('请选择货源时间');return;}if(!draft.items.length){showToast('请至少选择一张图片');return;}const btn=$('#saveTradeGalleryBatch');try{await commitTradeGalleryBatch(draft,btn,$('#tradeGallerySaveStatus'));revoke();closeModal();showToast(draft.sourcePending?'图片已保存，已进入待确认来源':'货源图片已保存');await renderTradeGallery();}catch(err){showToast(err.message);}};
+      renderDraft();
+    }});
+}
+async function commitTradeGalleryBatch(draft,btn,statusEl){
+  if(!tradeGalleryGuardOk())throw new Error('货源库保护检查未通过');
+  return withCoreActionLock(`trade-gallery-${draft.id}`,btn,'正在上传…',async()=>{
+    const uploaded=[];
+    try{
+      for(let i=0;i<draft.items.length;i++){
+        const x=draft.items[i];if(statusEl)statusEl.textContent=`正在上传 ${i+1}/${draft.items.length}：${x.file.name}`;
+        const result=await uploadTradeGalleryImage(x.file,draft.id);uploaded.push({...x,result});
+      }
+      const ledger=await getTradeGalleryLedger();if((ledger.batches||[]).some(x=>x.id===draft.id)){if(statusEl)statusEl.textContent='这批图片已经保存，无需重复提交';return;}
+      const received=new Date(draft.receivedAt);if(Number.isNaN(received.getTime()))throw new Error('货源时间无效');
+      const createdAt=nowISO(),batch={id:draft.id,dealerName:draft.sourcePending?'':draft.dealerName,sourcePending:Boolean(draft.sourcePending),receivedAt:received.toISOString(),note:draft.note||'',items:uploaded.map(({id,itemName,price,note,file,result})=>({id,url:result.url,mime:result.mime||file.type,size:n(result.size)||n(file.size),originalName:file.name,itemName:itemName||'',price:price===''?'':n(price),note:note||'',status:'active',createdAt})),createdAt,updatedAt:createdAt};
+      ledger.batches=[batch,...(ledger.batches||[])];await putTradeGalleryLedger(ledger);if(!batch.sourcePending)await rememberTradeGalleryDealer(batch.dealerName);await writeAudit('trade_gallery.create','tradeGallery',batch.id,`${tradeGalleryDealerLabel(batch)} · ${batch.items.length}张货源图`,null,{dealerName:batch.dealerName,sourcePending:batch.sourcePending,receivedAt:batch.receivedAt,count:batch.items.length});if(statusEl)statusEl.textContent='上传完成，已保存到调货货源库';
+    }catch(err){throw err;}
+  });
+}
+async function openTradeGalleryItemDetail(batchId,itemId){
+  const ledger=await getTradeGalleryLedger(),batch=(ledger.batches||[]).find(x=>x.id===batchId),item=batch?.items?.find(x=>x.id===itemId);if(!batch||!item)return;
+  const names=await tradeGalleryDealerSuggestions(),pending=tradeGalleryBatchPending(batch),active=tradeGalleryItemIsActive(item);
+  openModal('货源图片详情',`<form id="tradeGalleryItemForm"><img src="${esc(item.url)}" alt="" style="display:block;width:100%;max-height:48vh;object-fit:contain;background:#f2f4f7;border-radius:12px;margin-bottom:12px"><div class="form-group"><label class="form-label">同行名称（整批同步）</label><input id="tradeGalleryEditDealer" class="input" list="tradeGalleryEditDealerList" value="${esc(pending?'':batch.dealerName)}" placeholder="补同行名称"><datalist id="tradeGalleryEditDealerList">${names.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist><label class="source-pending-row"><input id="tradeGalleryEditPending" type="checkbox" ${pending?'checked':''}><span><strong>暂时不知道来源</strong><br><small>勾选后继续保留在“待确认来源”。</small></span></label></div><div class="form-row"><div class="form-group"><label class="form-label">货源 / 收到时间</label><input id="tradeGalleryEditDate" class="input" type="datetime-local" value="${esc(localInputDateTime(new Date(batch.receivedAt||batch.createdAt)))}"></div><div class="form-group"><label class="form-label">调货价</label><input id="tradeGalleryEditPrice" class="input" type="number" min="0" step="0.01" value="${item.price===''?'':esc(item.price)}" placeholder="未录价格"></div></div><div class="form-group"><label class="form-label">货品/图片名称</label><input id="tradeGalleryEditName" class="input" value="${esc(item.itemName||'')}" placeholder="原图没写名称也可以后补"></div><div class="form-group"><label class="form-label">图片备注</label><textarea id="tradeGalleryEditNote" class="textarea">${esc(item.note||'')}</textarea></div><div class="notice">货源时间：${esc(fmtDateTime(batch.receivedAt))}<br>实际入库：${esc(fmtDateTime(batch.createdAt))}<br>状态：${active?'在用':'已归档'}<br>来源标签只保存在系统里，不会改写原图像素。</div><button id="saveTradeGalleryItem" class="btn block" type="submit">保存修改</button>${active?'<button id="archiveTradeGalleryItem" class="btn secondary block" type="button" style="margin-top:8px">归档 / 标记已失效</button>':'<button id="restoreTradeGalleryItem" class="btn secondary block" type="button" style="margin-top:8px">恢复为在用</button>'}</form>`,{onOpen:()=>{
+    const pendingInput=$('#tradeGalleryEditPending'),dealerInput=$('#tradeGalleryEditDealer');const sync=()=>{dealerInput.disabled=pendingInput.checked;};pendingInput.onchange=sync;sync();
+    $('#tradeGalleryItemForm').onsubmit=async e=>{e.preventDefault();const btn=$('#saveTradeGalleryItem');try{await saveTradeGalleryItemEdit(batchId,itemId,{sourcePending:pendingInput.checked,dealerName:pendingInput.checked?'':dealerInput.value.trim(),receivedAt:$('#tradeGalleryEditDate').value,itemName:$('#tradeGalleryEditName').value.trim(),price:$('#tradeGalleryEditPrice').value,note:$('#tradeGalleryEditNote').value.trim()},btn);closeModal();showToast('已保存修改');await renderTradeGallery();}catch(err){showToast(err.message);}};
+    if($('#archiveTradeGalleryItem'))$('#archiveTradeGalleryItem').onclick=async()=>{if(!await confirmDialog('确定归档这张货源图片？原图会继续保留，不会从 R2 删除。'))return;const btn=$('#archiveTradeGalleryItem');try{await deleteTradeGalleryItem(batchId,itemId,btn);closeModal();showToast('已归档，原图仍保留');await renderTradeGallery();}catch(err){showToast(err.message);}};
+    if($('#restoreTradeGalleryItem'))$('#restoreTradeGalleryItem').onclick=async()=>{const btn=$('#restoreTradeGalleryItem');try{await restoreTradeGalleryItem(batchId,itemId,btn);closeModal();showToast('已恢复为在用');await renderTradeGallery();}catch(err){showToast(err.message);}};
+  }});
+}
+async function saveTradeGalleryItemEdit(batchId,itemId,changes,btn){
+  if(!tradeGalleryGuardOk())throw new Error('货源库保护检查未通过');
+  return withCoreActionLock(`trade-gallery-edit-${batchId}-${itemId}`,btn,'正在保存…',async()=>{const ledger=await getTradeGalleryLedger(),batch=(ledger.batches||[]).find(x=>x.id===batchId),item=batch?.items?.find(x=>x.id===itemId);if(!batch||!item)throw new Error('这张货源图不存在');if(!changes.sourcePending&&!changes.dealerName)throw new Error('请填写同行名称，或选择“暂时不知道来源”');const received=new Date(changes.receivedAt);if(Number.isNaN(received.getTime()))throw new Error('货源时间无效');const wasPending=tradeGalleryBatchPending(batch);batch.sourcePending=Boolean(changes.sourcePending);batch.dealerName=batch.sourcePending?'':changes.dealerName;batch.receivedAt=received.toISOString();batch.updatedAt=nowISO();if(wasPending&&!batch.sourcePending)batch.sourceConfirmedAt=nowISO();item.itemName=changes.itemName||'';item.price=changes.price===''?'':n(changes.price);item.note=changes.note||'';item.updatedAt=nowISO();await putTradeGalleryLedger(ledger);if(!batch.sourcePending)await rememberTradeGalleryDealer(batch.dealerName);await writeAudit('trade_gallery.edit','tradeGallery',item.id,`${tradeGalleryDealerLabel(batch)} · ${item.itemName||'未命名'} · ${tradeGalleryPriceText(item.price)}`,null,{batchId,dealerName:batch.dealerName,sourcePending:batch.sourcePending,price:item.price});});
+}
+async function deleteTradeGalleryItem(batchId,itemId,btn){
+  if(!tradeGalleryGuardOk())throw new Error('货源库保护检查未通过');
+  return withCoreActionLock(`trade-gallery-archive-${batchId}-${itemId}`,btn,'正在归档…',async()=>{const ledger=await getTradeGalleryLedger(),batch=(ledger.batches||[]).find(x=>x.id===batchId),item=batch?.items?.find(x=>x.id===itemId);if(!batch||!item)return;item.status='archived';item.archivedAt=nowISO();item.updatedAt=nowISO();batch.updatedAt=nowISO();await putTradeGalleryLedger(ledger);await writeAudit('trade_gallery.archive','tradeGallery',itemId,`${tradeGalleryDealerLabel(batch)} · 归档1张货源图`,null,{batchId,urlKept:true});});
+}
+async function restoreTradeGalleryItem(batchId,itemId,btn){
+  if(!tradeGalleryGuardOk())throw new Error('货源库保护检查未通过');
+  return withCoreActionLock(`trade-gallery-restore-${batchId}-${itemId}`,btn,'正在恢复…',async()=>{const ledger=await getTradeGalleryLedger(),batch=(ledger.batches||[]).find(x=>x.id===batchId),item=batch?.items?.find(x=>x.id===itemId);if(!batch||!item)return;item.status='active';item.restoredAt=nowISO();item.updatedAt=nowISO();batch.updatedAt=nowISO();await putTradeGalleryLedger(ledger);await writeAudit('trade_gallery.restore','tradeGallery',itemId,`${tradeGalleryDealerLabel(batch)} · 恢复1张货源图`,null,{batchId});});
+}
+
 async function renderMore(){
-  setHeader('更多功能','客户、盘点、流水、备份');
-  const items=[['pass-deals','↔','过手差价（测试）','不建商品、不动库存，单独记录同行转差价'],['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],['shortcut-setup','⚡','iPhone快捷保存','一次设置，原图/视频/店铺图直接进相册'],['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售'],['customers','♙','客户管理','客户信息与拿货统计'],['sales','▥','销售单管理','撤销、恢复、复制重新开单'],['stocktake','✓','库存盘点','批量盘点并生成差异流水'],['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化'],['health','◎','库存体检','核对商品库存与全部库存流水'],['audit','◷','操作日志','查看重要修改与库存变化'],['settings','⚙','数据与设置','云端备份、设备与安全设置']];
-  $('#main').innerHTML=`<div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div><div class="notice warn" style="margin-top:12px">秦丝建议继续作为正式账本；漠翠系统用于玉石专业资料、借调和分析。导入前请先做完整备份。</div>`;
+  setHeader('更多功能','按业务场景分组，少翻找一步');
+  const groups=[
+    ['同行与临时货',[
+      ['pass-deals','↔','过手差价','不建商品、不动库存，单独记录同行转差价'],
+      ['trade-gallery','▧','调货货源库（试用）','保存同行图片、报价、货源时间与待确认来源']
+    ]],
+    ['日常业务管理',[
+      ['customers','♙','客户管理','客户信息与拿货统计'],
+      ['sales','▥','销售单管理','撤销、恢复、复制重新开单'],
+      ['stocktake','✓','库存盘点','批量盘点并生成差异流水'],
+      ['ledger','≡','库存流水','查询所有入库、出库、销售、调借变化']
+    ]],
+    ['内容与数据导入',[
+      ['content','▣','内容工作台','今日待发、素材复用、文案与发布记录'],
+      ['shortcut-setup','⚡','iPhone快捷保存','原图 / 视频 / 店铺图快速保存到相册'],
+      ['qinsilk-import','⇩','秦丝数据导入','Excel导入商品、客户、库存和销售']
+    ]],
+    ['安全与维护',[
+      ['health','◎','库存体检','核对商品库存与全部库存流水'],
+      ['audit','◷','操作日志','查看重要修改与库存变化'],
+      ['settings','⚙','数据与设置','云端备份、设备与安全设置']
+    ]]
+  ];
+  $('#main').innerHTML=groups.map(([title,items])=>`<section class="more-group"><div class="more-group-title">${esc(title)}</div><div class="list">${items.map(x=>`<div class="list-item clickable more-item" data-route="${x[0]}"><div class="thumb placeholder">${x[1]}</div><div class="item-main"><div class="item-title">${x[2]}</div><div class="item-meta">${x[3]}</div></div><div>›</div></div>`).join('')}</div></section>`).join('')+`<div class="notice warn">秦丝继续作为正式账本；漠翠系统的新增同行货模块保持与正式库存隔离。导入、恢复或覆盖云端前仍要先做完整备份。</div>`;
   $$('.more-item').forEach(el=>el.onclick=()=>navigate(el.dataset.route));
 }
 
@@ -1777,7 +2001,7 @@ async function renderSettings(){
   <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：v3.10.1-test · 今日销售日期修复 + 外部货流转测试 · 核心交易/UI稳定基线保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：v3.11.0 · 过手差价正式版 + 调货货源库安全试用 + 操作动线优化 · 核心交易层保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
