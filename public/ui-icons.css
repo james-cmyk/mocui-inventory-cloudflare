@@ -1,42 +1,134 @@
 /*
- * 漠翠进销存 · Apple-inspired Icon Layer v1.3
- * 仅作用于视觉层，不修改库存 / 销售 / 调借 / IndexedDB / 云同步业务逻辑。
+ * 漠翠进销存 · Apple Light Density Layer v1.4
+ * 目标：减少字、减少高度、单图标、保留清晰层级。
+ * 不修改库存 / 销售 / 调借 / IndexedDB / 云同步业务逻辑。
  */
 :root{
   --ui-ink:#111111;--ui-muted:#7a7a80;--ui-border:#e5e5ea;--ui-surface:#fff;
   --ui-bg:#f5f5f7;--ui-success:#34c759;--ui-warning:#ff9f0a;--ui-danger:#ff3b30;
-  --ui-info:#007aff;--ui-icon-size:20px;--ui-icon-size-lg:24px;
+  --ui-info:#007aff;--ui-icon-size:18px;--ui-icon-size-lg:22px;
 }
 .ui-icon,.ui-icon-only img,.nav-item img,[data-ui-icon]{
   display:block;width:var(--ui-icon-size);height:var(--ui-icon-size);object-fit:contain;
-  flex:0 0 auto;pointer-events:none;user-select:none;-webkit-user-drag:none;
+  flex:0 0 auto;pointer-events:none;user-select:none;-webkit-user-drag:none
 }
-.ui-icon-lg{width:var(--ui-icon-size-lg)!important;height:var(--ui-icon-size-lg)!important}
-.ui-icon-only{display:inline-grid!important;place-items:center!important;min-width:44px;min-height:44px}
+.ui-icon-only{display:inline-grid!important;place-items:center!important;min-width:40px;min-height:40px}
 .ui-icon-only.hidden,.page-back.hidden,#pageBack.hidden,#topAction.hidden{display:none!important}
-.ui-icon-only img{width:22px;height:22px}
+.ui-icon-only img{width:20px;height:20px}
+
+/* Dock */
 .bottom-nav .nav-item span{display:grid;place-items:center}
-.bottom-nav .nav-item img{width:24px;height:24px;opacity:.52;transition:opacity .14s ease,transform .14s ease}
-.bottom-nav .nav-item.active img{opacity:1;transform:translateY(-1px)}
+.bottom-nav .nav-item img{width:21px;height:21px;opacity:.48;transition:opacity .14s ease,transform .14s ease}
+.bottom-nav .nav-item.active img{opacity:1;transform:none}
 .bottom-nav .nav-item b{letter-spacing:0}
-.ui-decorated>.ui-auto-icon{width:18px;height:18px;object-fit:contain;flex:0 0 auto}
-.ui-decorated.ui-action-tile>.ui-auto-icon{width:24px;height:24px}
+.nav-item>span{font-size:0!important}
+
+/* General PNG decoration */
+.ui-decorated>.ui-auto-icon{width:16px;height:16px;object-fit:contain;flex:0 0 auto}
 .ui-icon-slot{display:grid!important;place-items:center!important;font-size:0!important}
-.ui-icon-slot>.ui-auto-icon{display:block;width:24px!important;height:24px!important;object-fit:contain;margin:0!important}
-.workflow-card>.ui-auto-icon{display:block;width:24px;height:24px;object-fit:contain;margin:0 auto 12px}
+.ui-icon-slot>.ui-auto-icon{display:block;width:20px!important;height:20px!important;object-fit:contain;margin:0!important}
 button.ui-decorated:not(.workflow-card):not(.ui-icon-replaced),
 a.ui-decorated:not(.workflow-card):not(.ui-icon-replaced){
-  display:inline-flex;align-items:center;justify-content:center;gap:8px
+  display:inline-flex;align-items:center;justify-content:center;gap:6px
 }
-.card,.panel,.sheet,.metric-card{box-shadow:none!important}
-button .ui-auto-icon,a .ui-auto-icon{pointer-events:none}
-button.primary .ui-auto-icon,.btn.primary .ui-auto-icon,.primary-btn .ui-auto-icon,button.is-primary .ui-auto-icon{
+button.primary .ui-auto-icon,.btn.primary .ui-auto-icon,.primary-btn .ui-auto-icon,
+button.is-primary .ui-auto-icon,.segment button.active .ui-auto-icon{
   filter:brightness(0) invert(1)
 }
+
+/* ----- 首页：快捷卡片重做为更轻、更短的 Apple 式两行信息 ----- */
+body[data-ui-route="dashboard"] .workflow-section{margin-top:14px!important}
+body[data-ui-route="dashboard"] .section-title{margin-top:13px!important;margin-bottom:7px!important}
+body[data-ui-route="dashboard"] .workflow-grid{gap:8px!important}
+body[data-ui-route="dashboard"] .workflow-card{
+  min-height:82px!important;
+  padding:11px 12px!important;
+  border-radius:13px!important;
+  display:grid!important;
+  grid-template-columns:20px minmax(0,1fr)!important;
+  grid-template-areas:"icon title" "meta meta"!important;
+  align-content:center!important;
+  justify-content:initial!important;
+  gap:5px 8px!important;
+  box-shadow:none!important;
+}
+body[data-ui-route="dashboard"] .workflow-card>.ui-auto-icon{
+  grid-area:icon!important;width:17px!important;height:17px!important;margin:0!important;align-self:center!important
+}
+body[data-ui-route="dashboard"] .workflow-title{
+  grid-area:title;font-size:14px!important;line-height:1.25!important;align-self:center!important
+}
+body[data-ui-route="dashboard"] .workflow-meta{
+  grid-area:meta;font-size:10px!important;line-height:1.35!important;
+  white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important
+}
+body[data-ui-route="dashboard"] .workflow-foot{display:none!important}
+body[data-ui-route="dashboard"] .metric{padding:10px!important;border-radius:13px!important}
+body[data-ui-route="dashboard"] .metric .label{font-size:10px!important}
+body[data-ui-route="dashboard"] .metric .value{font-size:18px!important;margin-top:4px!important}
+body[data-ui-route="dashboard"] .metric .hint{
+  font-size:9px!important;line-height:1.35!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+
+/* ----- 更多：只有一个图标，列表压缩 ----- */
+body[data-ui-route="more"] .more-item>.ui-auto-icon{display:none!important}
+body[data-ui-route="more"] .more-group{margin-bottom:13px!important}
+body[data-ui-route="more"] .more-group-title{font-size:12px!important;margin:0 4px 6px!important}
+body[data-ui-route="more"] .more-item{
+  min-height:68px!important;padding:9px 12px!important;gap:10px!important;border-radius:13px!important
+}
+body[data-ui-route="more"] .more-item>.thumb{
+  width:42px!important;height:42px!important;border-radius:12px!important;flex:0 0 42px!important
+}
+body[data-ui-route="more"] .more-item>.thumb .ui-auto-icon{width:18px!important;height:18px!important}
+body[data-ui-route="more"] .more-item .item-title{font-size:13px!important}
+body[data-ui-route="more"] .more-item .item-meta{
+  font-size:10px!important;margin-top:2px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important
+}
+
+/* ----- 商品：保留图片识别能力，但减少纵向占用 ----- */
+body[data-ui-route="products"] .grid-3 .metric{padding:9px!important;border-radius:12px!important}
+body[data-ui-route="products"] .grid-3 .metric .label{font-size:10px!important}
+body[data-ui-route="products"] .grid-3 .metric .value{font-size:15px!important;margin-top:3px!important}
+body[data-ui-route="products"] .product-filter-row{margin-top:9px!important;margin-bottom:8px!important}
+body[data-ui-route="products"] .btn-row{gap:6px!important}
+body[data-ui-route="products"] .btn-row .btn{min-height:38px!important;padding:8px 10px!important;font-size:11px!important}
+body[data-ui-route="products"] .list{gap:7px!important}
+body[data-ui-route="products"] .list-item{padding:8px!important;gap:9px!important;border-radius:13px!important}
+body[data-ui-route="products"] .thumb{width:50px!important;height:50px!important;border-radius:11px!important}
+body[data-ui-route="products"] .item-title{font-size:13px!important}
+body[data-ui-route="products"] .item-meta{font-size:10px!important;margin-top:2px!important;line-height:1.4!important}
+body[data-ui-route="products"] .badge{font-size:9px!important;padding:3px 7px!important}
+
+/* ----- 调借：把解释文字降为辅助信息 ----- */
+body[data-ui-route="loans"] #main>.notice:first-child{
+  font-size:10px!important;line-height:1.5!important;padding:8px 10px!important;margin-bottom:8px!important;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden
+}
+body[data-ui-route="loans"] #openExternalGoods{
+  min-height:40px!important;padding:8px 12px!important;margin-bottom:9px!important;font-size:12px!important
+}
+body[data-ui-route="loans"] .grid-3 .metric{padding:9px!important}
+body[data-ui-route="loans"] .grid-3 .metric .value{font-size:17px!important}
+
+/* ----- 报表：缩短说明、让数字优先 ----- */
+body[data-ui-route="reports"] #reportBody>.notice:first-child{
+  font-size:10px!important;line-height:1.5!important;padding:8px 10px!important;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden
+}
+body[data-ui-route="reports"] .section-title{margin-top:14px!important;margin-bottom:7px!important}
+body[data-ui-route="reports"] .metric{padding:10px!important}
+body[data-ui-route="reports"] .metric .label{font-size:10px!important}
+body[data-ui-route="reports"] .metric .value{font-size:18px!important}
+body[data-ui-route="reports"] .metric.compact .value{font-size:14px!important}
+body[data-ui-route="reports"] .metric .hint{font-size:9px!important}
+body[data-ui-route="reports"] .segment button .ui-auto-icon{width:14px!important;height:14px!important}
+
+/* Shared lightness */
+.card,.panel,.sheet,.metric-card{box-shadow:none!important}
+button .ui-auto-icon,a .ui-auto-icon{pointer-events:none}
 .ui-danger-icon{filter:none!important}
-.nav-item>span{font-size:0!important}
+
 @media(max-width:759px){
-  .bottom-nav .nav-item img{width:23px;height:23px}
-  button.ui-decorated:not(.workflow-card):not(.ui-icon-replaced),
-  a.ui-decorated:not(.workflow-card):not(.ui-icon-replaced){gap:7px}
+  .bottom-nav .nav-item img{width:20px;height:20px}
 }

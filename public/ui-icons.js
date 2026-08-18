@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 漠翠进销存 · UI Icon Decorator v1.3
+ * 漠翠进销存 · UI Icon Decorator v1.4
  * 目的：把已上传的透明 PNG 图标映射到现有业务按钮、工作流卡片和更多功能卡片。
  * 原则：不改业务函数、不重绑点击事件、不改数据库结构。
  */
@@ -174,8 +174,15 @@
   ]);
 
   function findLegacyIconSlot(el){
+    // “更多功能”当前真实结构就是 .more-item > .thumb.placeholder。
+    // 必须优先复用这个底座，否则会在卡片最左侧再插入一枚 PNG，造成双图标。
+    const moreThumb = el.matches?.('.more-item')
+      ? el.querySelector(':scope > .thumb.placeholder')
+      : null;
+    if(moreThumb) return moreThumb;
+
     const byClass = el.querySelector?.(
-      ':scope > .more-icon,:scope > .feature-icon,:scope > .menu-icon,' +
+      ':scope > .thumb.placeholder,:scope > .more-icon,:scope > .feature-icon,:scope > .menu-icon,' +
       ':scope > .icon-box,:scope > .list-icon,:scope > .workflow-icon,' +
       ':scope > .entry-icon,:scope > .action-icon'
     );
@@ -202,6 +209,10 @@
 
     const icon = resolveIcon(el);
     if (!icon) return;
+
+    if(el.matches?.('.more-item')){
+      [...el.querySelectorAll(':scope > .ui-auto-icon')].forEach(node=>node.remove());
+    }
 
     const existingSlot = findLegacyIconSlot(el);
     if(existingSlot){
@@ -237,8 +248,15 @@
     }
   }
 
+  function syncRouteMarker(){
+    const active=document.querySelector('.bottom-nav .nav-item.active');
+    const route=active?.dataset?.route||'';
+    if(route) document.body.dataset.uiRoute=route;
+  }
+
   function scan(root = document) {
     if (!(root instanceof Element || root instanceof Document)) return;
+    syncRouteMarker();
     root.querySelectorAll('button, a, [role="button"], .clickable').forEach(decorate);
   }
 
