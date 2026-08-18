@@ -1,8 +1,8 @@
 'use strict';
 
 /*
- * 漠翠进销存 · UI Icon Decorator v1.0
- * 目的：把已上传的透明 PNG 图标映射到现有业务按钮。
+ * 漠翠进销存 · UI Icon Decorator v1.1
+ * 目的：把已上传的透明 PNG 图标映射到现有业务按钮、工作流卡片和更多功能卡片。
  * 原则：不改业务函数、不重绑点击事件、不改数据库结构。
  */
 (() => {
@@ -64,15 +64,17 @@
     offline: `${BASE}/status/ic_status_offline.png`,
   };
 
-  // 从“最具体”到“较通用”，避免“商品”抢先匹配“新增商品”。
   const TEXT_RULES = [
     [/销售开单|新建销售|新增销售|开单/, ICONS.salesOrder],
     [/新增商品|添加商品|新建商品/, ICONS.addProduct],
     [/新增调借|新建调借|添加调借/, ICONS.addLending],
     [/过手差价|过手单/, ICONS.profitDifference],
+    [/调货货源库|货源库/, ICONS.gallery],
+    [/外部同行货|外部货/, ICONS.reorder],
     [/客户管理|客户列表|客户$/, ICONS.customers],
+    [/销售单管理|销售记录|订单|单据/, ICONS.orders],
     [/库存盘点|盘点/, ICONS.inventory],
-    [/订单|销售记录|单据/, ICONS.orders],
+    [/库存流水|库存明细/, ICONS.list],
     [/销售报表|销售统计/, ICONS.salesReport],
     [/库存报表|库存统计/, ICONS.inventoryReport],
     [/调借报表|调借统计/, ICONS.lendingReport],
@@ -129,52 +131,73 @@
 
   const normalize = s => String(s || '').replace(/\s+/g, '').trim();
 
+  function semanticText(el){
+    const preferred = el.querySelector?.('.workflow-title,.item-title,.more-title,.card-title,.menu-title,strong');
+    if(preferred){
+      const t=normalize(preferred.textContent);
+      if(t) return t;
+    }
+    const aria=normalize(el.getAttribute?.('aria-label'));
+    if(aria) return aria;
+    return normalize(el.textContent).slice(0,80);
+  }
+
   function resolveIcon(el) {
-    const explicit = el.getAttribute('data-ui-icon');
+    const explicit = el.getAttribute?.('data-ui-icon');
     if (explicit && ICONS[explicit]) return ICONS[explicit];
 
-    const aria = normalize(el.getAttribute('aria-label'));
+    const aria = normalize(el.getAttribute?.('aria-label'));
     if (aria) {
       const hit = ARIA_RULES.find(([re]) => re.test(aria));
       if (hit) return hit[1];
     }
 
-    const text = normalize(el.textContent);
-    if (!text || text.length > 18) return null;
+    const text = semanticText(el);
+    if (!text) return null;
     const hit = TEXT_RULES.find(([re]) => re.test(text));
     return hit ? hit[1] : null;
+  }
+
+  function makeIcon(src){
+    const img=document.createElement('img');
+    img.className='ui-auto-icon';
+    img.src=src;
+    img.alt='';
+    img.setAttribute('aria-hidden','true');
+    return img;
   }
 
   function decorate(el) {
     if (!(el instanceof Element)) return;
     if (el.matches('.nav-item, .ui-icon-only')) return;
-    if (el.querySelector(':scope > .ui-auto-icon')) return;
+    if (el.querySelector(':scope > .ui-auto-icon,:scope > .ui-icon-slot > .ui-auto-icon')) return;
 
     const icon = resolveIcon(el);
     if (!icon) return;
 
-    const img = document.createElement('img');
-    img.className = 'ui-auto-icon';
-    img.src = icon;
-    img.alt = '';
-    img.setAttribute('aria-hidden', 'true');
+    const img=makeIcon(icon);
 
-    // 保持原事件和文本节点不变，只在最前面插入图片。
-    el.insertBefore(img, el.firstChild);
+    const existingSlot = el.querySelector(':scope > .more-icon,:scope > .feature-icon,:scope > .menu-icon,:scope > .icon-box,:scope > .list-icon');
+    if(existingSlot){
+      existingSlot.textContent='';
+      existingSlot.classList.add('ui-icon-slot');
+      existingSlot.appendChild(img);
+    }else{
+      el.insertBefore(img, el.firstChild);
+    }
+
     el.classList.add('ui-decorated');
-
     const cls = String(el.className || '');
-    if (/quick|action|shortcut|entry|tile|menu-card/i.test(cls)) {
+    if (/workflow-card|quick|action|shortcut|entry|tile|menu-card/i.test(cls)) {
       el.classList.add('ui-action-tile');
     }
   }
 
   function scan(root = document) {
     if (!(root instanceof Element || root instanceof Document)) return;
-    root.querySelectorAll('button, a, [role="button"]').forEach(decorate);
+    root.querySelectorAll('button, a, [role="button"], .clickable').forEach(decorate);
   }
 
-  // app.js 会动态重绘 main / modalRoot，因此使用 MutationObserver 自动补图标。
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (scheduled) return;
