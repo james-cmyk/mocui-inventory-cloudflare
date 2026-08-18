@@ -1,0 +1,114 @@
+/*
+ * 漠翠进销存 · Apple-inspired Icon Layer v1.0
+ * 仅作用于视觉层，不修改库存 / 销售 / 调借 / IndexedDB / 云同步业务逻辑。
+ */
+
+:root{
+  --ui-ink:#111111;
+  --ui-muted:#7a7a80;
+  --ui-border:#e5e5ea;
+  --ui-surface:#ffffff;
+  --ui-bg:#f5f5f7;
+  --ui-success:#34c759;
+  --ui-warning:#ff9f0a;
+  --ui-danger:#ff3b30;
+  --ui-info:#007aff;
+  --ui-icon-size:20px;
+  --ui-icon-size-lg:24px;
+}
+
+/* PNG 图标统一尺寸 */
+.ui-icon,
+.ui-icon-only img,
+.nav-item img,
+[data-ui-icon]{
+  display:block;
+  width:var(--ui-icon-size);
+  height:var(--ui-icon-size);
+  object-fit:contain;
+  flex:0 0 auto;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+
+.ui-icon-lg{width:var(--ui-icon-size-lg)!important;height:var(--ui-icon-size-lg)!important}
+
+/* 顶部图标按钮 */
+.ui-icon-only{
+  display:inline-grid!important;
+  place-items:center!important;
+  min-width:44px;
+  min-height:44px;
+}
+.ui-icon-only img{width:22px;height:22px}
+
+/* 底部 Dock：保留现有路由和稳定壳层，仅换成真实 PNG 图标 */
+.bottom-nav .nav-item span{
+  display:grid;
+  place-items:center;
+}
+.bottom-nav .nav-item img{
+  width:24px;
+  height:24px;
+  opacity:.52;
+  transition:opacity .14s ease, transform .14s ease;
+}
+.bottom-nav .nav-item.active img{
+  opacity:1;
+  transform:translateY(-1px);
+}
+.bottom-nav .nav-item b{
+  letter-spacing:0;
+}
+
+/* 动态业务按钮图标 */
+.ui-decorated{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+}
+.ui-decorated > .ui-auto-icon{
+  width:18px;
+  height:18px;
+  object-fit:contain;
+  flex:0 0 auto;
+}
+.ui-decorated.ui-action-tile > .ui-auto-icon{
+  width:24px;
+  height:24px;
+}
+
+/* 轻量扁平化：只压低默认卡片阴影，不改变布局结构 */
+.card,
+.panel,
+.sheet,
+.metric-card{
+  box-shadow:none!important;
+}
+
+/* 图片和图标不会改变表单点击热区 */
+button .ui-auto-icon,
+a .ui-auto-icon{
+  pointer-events:none;
+}
+
+/* 深色主按钮中的黑色 PNG 自动反白 */
+button.primary .ui-auto-icon,
+.btn.primary .ui-auto-icon,
+.primary-btn .ui-auto-icon,
+button.is-primary .ui-auto-icon{
+  filter:brightness(0) invert(1);
+}
+
+/* 删除/危险操作可使用语义红，但不强行改变既有按钮底色 */
+.ui-danger-icon{filter:none!important}
+
+/* 防止原有字符图标与 PNG 重叠 */
+.nav-item > span{font-size:0!important}
+
+@media (max-width:759px){
+  .bottom-nav .nav-item img{width:23px;height:23px}
+  .ui-decorated{gap:7px}
+}
