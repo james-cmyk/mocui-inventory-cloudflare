@@ -132,3 +132,189 @@ button .ui-auto-icon,a .ui-auto-icon{pointer-events:none}
 @media(max-width:759px){
   .bottom-nav .nav-item img{width:20px;height:20px}
 }
+
+
+/* =========================================================
+   漠翠进销存 · 二级页面收口 v1.5
+   仅调整视觉与布局，不修改任何业务数据和计算逻辑
+   ========================================================= */
+
+@media (max-width:760px){
+
+  /* 通用二级页面：减少纵向浪费 */
+  .main{padding-top:10px!important}
+  .notice{padding:8px 10px!important;margin-bottom:9px!important;font-size:11px!important;line-height:1.5!important}
+  .form-group{margin-bottom:10px!important}
+  .form-label{font-size:11px!important;margin-bottom:5px!important}
+  .input,.select,.textarea{padding:9px 11px!important;border-radius:11px!important}
+  .textarea{min-height:72px!important}
+  .upload-box{min-height:84px!important}
+  .empty{padding:24px 12px!important}
+  .empty .emoji{font-size:26px!important}
+
+  /* 销售开单 */
+  body:has(.sale-form) .sale-form,
+  body:has(#saleForm) #saleForm{gap:8px!important}
+  body:has(.sale-form) .card,
+  body:has(#saleForm) .card{padding:11px!important}
+  body:has(.sale-form) .empty,
+  body:has(#saleForm) .empty{padding:20px 10px!important}
+  body:has(.sale-form) .form-group,
+  body:has(#saleForm) .form-group{margin-bottom:9px!important}
+
+  /* 新增商品弹窗：减少输入高度 */
+  .modal .form-group{margin-bottom:9px!important}
+  .modal .input,.modal .select,.modal .textarea{min-height:42px!important}
+  .modal .upload-box{min-height:92px!important}
+  .modal-head{padding:10px 0 8px!important;margin-bottom:9px!important}
+  .modal-title{font-size:16px!important}
+  .modal-close{width:32px!important;height:32px!important}
+
+  /* 调借录入页面 */
+  .loan-step-card{padding:11px!important;margin-bottom:9px!important}
+  .loan-step-title{margin-bottom:9px!important;font-size:14px!important}
+  .loan-step-title span{width:22px!important;height:22px!important;border-radius:7px!important}
+  .loan-type-switch button{padding:8px 6px!important;font-size:11px!important}
+  .loan-upload-box{min-height:82px!important}
+  .field-help{font-size:9px!important;line-height:1.4!important;margin-top:4px!important}
+
+  /* 过手差价：黄色说明降级为辅助提示 */
+  body:has(.protected-zone) .notice.warn,
+  body:has(#passThroughForm) .notice.warn{
+    padding:8px 10px!important;
+    font-size:10px!important;
+    line-height:1.45!important;
+    border-radius:12px!important;
+  }
+
+  /* 调货货源库：长说明只显示两行 */
+  body:has(#sourceLibrary) .notice,
+  body:has(.source-library) .notice{
+    display:-webkit-box!important;
+    -webkit-box-orient:vertical!important;
+    -webkit-line-clamp:2!important;
+    overflow:hidden!important;
+  }
+
+  /* 外部同行货：说明压缩 */
+  body:has(#externalGoods) .notice,
+  body:has(.external-goods) .notice{
+    display:-webkit-box!important;
+    -webkit-box-orient:vertical!important;
+    -webkit-line-clamp:2!important;
+    overflow:hidden!important;
+  }
+
+  /* 库存盘点 */
+  .stocktake-row{padding:8px!important;gap:8px!important}
+  .stocktake-row .thumb{width:48px!important;height:48px!important}
+  .stocktake-row input[type="number"]{max-width:84px!important;min-height:42px!important;padding:7px 9px!important}
+  body:has(.stocktake-row) .notice.warn{
+    font-size:10px!important;
+    padding:7px 9px!important;
+  }
+
+  /* 内容工作台：降低卡片拥挤感，不删除功能 */
+  .content-card,.content-product-card{padding:10px!important}
+  .content-card .thumb,.content-product-card .thumb{width:68px!important;height:68px!important}
+  .content-card .badge,.content-product-card .badge{font-size:9px!important;padding:3px 6px!important}
+  .content-card .actions,.content-product-card .actions{gap:7px!important;flex-wrap:wrap!important}
+  .content-card .actions button,.content-product-card .actions button{
+    font-size:10px!important;
+    min-height:30px!important;
+    padding:4px 6px!important;
+  }
+
+  /* 分类管理：压缩行高，降低删除按钮视觉权重 */
+  .category-manager-row{min-height:48px!important;padding-top:5px!important;padding-bottom:5px!important}
+  .category-manager-row.child{min-height:44px!important}
+  .category-manager-name strong{font-size:13px!important}
+  .category-inline-action{font-size:10px!important;padding:6px 3px!important}
+  .category-inline-action.danger{opacity:.7!important}
+
+  /* 批量导入弹窗 */
+  body:has(.batch-import) .notice.warn,
+  .modal:has(input[type="file"]) .notice.warn{
+    font-size:10px!important;
+    line-height:1.45!important;
+    padding:7px 9px!important;
+  }
+
+  /* 分类选择器：核心布局修复 */
+  .category-picker-panel{height:min(84dvh,720px)!important}
+  .category-picker-body,
+  .category-picker-list{overflow-x:hidden!important;width:100%!important}
+
+  .category-picker-row,
+  .category-picker-row.category-special,
+  .category-picker-row.category-child{
+    display:grid!important;
+    grid-template-columns:28px minmax(0,1fr) 24px!important;
+    align-items:center!important;
+    gap:8px!important;
+    width:100%!important;
+    min-width:0!important;
+    min-height:50px!important;
+    padding:0 12px!important;
+    writing-mode:horizontal-tb!important;
+    text-orientation:mixed!important;
+  }
+
+  .category-picker-row.category-child{
+    padding-left:40px!important;
+    grid-template-columns:18px minmax(0,1fr) 24px!important;
+  }
+
+  .category-picker-row > span{
+    display:block!important;
+    width:28px!important;
+    min-width:28px!important;
+    height:auto!important;
+    writing-mode:horizontal-tb!important;
+  }
+
+  .category-picker-row > strong,
+  .category-picker-row .category-pick-main,
+  .category-picker-row .category-pick-main strong{
+    min-width:0!important;
+    width:auto!important;
+    display:block!important;
+    writing-mode:horizontal-tb!important;
+    text-orientation:mixed!important;
+    white-space:nowrap!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+  }
+
+  .category-picker-row > strong{
+    font-size:14px!important;
+    line-height:1.3!important;
+  }
+
+  .category-picker-row > b{
+    width:24px!important;
+    min-width:24px!important;
+    writing-mode:horizontal-tb!important;
+  }
+
+  .category-expand{
+    display:block!important;
+    width:28px!important;
+    min-width:28px!important;
+  }
+
+  /* 避免“全部分类 / 未分类”被图标装饰器插入左侧孤立图标 */
+  .category-picker-row.category-special > .ui-auto-icon{
+    display:none!important;
+  }
+
+  /* 所有分类弹层文字禁止竖排 */
+  #categoryPickerOverlay button,
+  #categoryPickerOverlay strong,
+  #categoryPickerOverlay small,
+  #categoryPickerOverlay span,
+  #categoryPickerOverlay b{
+    writing-mode:horizontal-tb!important;
+    text-orientation:mixed!important;
+  }
+}

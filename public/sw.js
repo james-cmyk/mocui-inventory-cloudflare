@@ -1,7 +1,7 @@
-const CACHE='mocui-v3.11.0-ui-icons-1.4.0';
+const CACHE='mocui-v3.11.0-ui-icons-1.5.0';
 const CORE=[
   './','./index.html','./offline.html',
-  './app.css','./ui-icons.css?v=1.4.0','./ui-shell-stable.css',
+  './app.css','./ui-icons.css?v=1.5.0','./ui-shell-stable.css',
   './cloud.js','./qinsilk-import.js','./content-workbench.js',
   './share.css','./share.js','./app.js','./ui-icons.js?v=1.4.0',
   './ui-shell-guard.js','./pwa.js','./manifest.webmanifest',
@@ -21,4 +21,4 @@ self.addEventListener('fetch',event=>{
   if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
-// UI v1.4：单图标 + 主页/商品/调借/报表/更多统一轻量密度。
+// UI v1.5：二级业务页面收口 + 分类选择器布局修复。
