@@ -1,7 +1,15 @@
-const CACHE='mocui-v3.11.0-safe-workflow';
-const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.11.0-ui-icons-1.2.0';
+const CORE=[
+  './','./index.html','./offline.html',
+  './app.css','./ui-icons.css?v=1.2.0','./ui-shell-stable.css',
+  './cloud.js','./qinsilk-import.js','./content-workbench.js',
+  './share.css','./share.js','./app.js','./ui-icons.js?v=1.2.0',
+  './ui-shell-guard.js','./pwa.js','./manifest.webmanifest',
+  './icon-180.png','./icon-192.png','./icon-512.png'
+];
 
 self.addEventListener('install',event=>{
+  self.skipWaiting();
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
 });
 
@@ -40,10 +48,16 @@ async function staleWhileRevalidate(request,event){
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')) return;
-  if(event.request.mode==='navigate'&&url.pathname==='/share.html'){event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match('./share.html')||Response.error()));return;}
+  if(event.request.mode==='navigate'&&url.pathname==='/share.html'){
+    event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match('./share.html')||Response.error()));
+    return;
+  }
   if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return;}
-  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
+  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){
+    event.respondWith(staleWhileRevalidate(event.request,event));
+    return;
+  }
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
-// v3.11.0：过手差价转正式；新增安全版调货货源库（待确认来源、同行名称管理、软归档保留R2原图）；首页/更多页动线重排；核心交易层与UI稳定基线继续冻结
+// UI 图标缓存版本 1.2.0：强制刷新 ui-icons.js / ui-icons.css，避免 iOS PWA 长期命中旧缓存。
