@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * 漠翠进销存 · UI Icon Decorator v1.1
+ * 漠翠进销存 · UI Icon Decorator v1.3
  * 目的：把已上传的透明 PNG 图标映射到现有业务按钮、工作流卡片和更多功能卡片。
  * 原则：不改业务函数、不重绑点击事件、不改数据库结构。
  */
@@ -167,26 +167,70 @@
     return img;
   }
 
+  const LEGACY_SYMBOLS = new Set([
+    '↔','⇄','⇆','⇋','⇌','▧','▥','▦','▤','▣','□','▢','◇',
+    '♙','♟','♜','✓','✔','≡','☰','⌕','⌂','⌘','⚙','✎','✐',
+    '⊕','＋','+','−','-'
+  ]);
+
+  function findLegacyIconSlot(el){
+    const byClass = el.querySelector?.(
+      ':scope > .more-icon,:scope > .feature-icon,:scope > .menu-icon,' +
+      ':scope > .icon-box,:scope > .list-icon,:scope > .workflow-icon,' +
+      ':scope > .entry-icon,:scope > .action-icon'
+    );
+    if(byClass) return byClass;
+
+    const all = [...(el.querySelectorAll?.('*') || [])];
+    for(const node of all){
+      if(node.children.length) continue;
+      const t = normalize(node.textContent);
+      if(LEGACY_SYMBOLS.has(t)) return node;
+    }
+    return null;
+  }
+
+  function removeDirectDuplicateAutoIcons(el, keep=null){
+    [...el.querySelectorAll(':scope > .ui-auto-icon')].forEach(node=>{
+      if(node!==keep) node.remove();
+    });
+  }
+
   function decorate(el) {
     if (!(el instanceof Element)) return;
     if (el.matches('.nav-item, .ui-icon-only')) return;
-    if (el.querySelector(':scope > .ui-auto-icon,:scope > .ui-icon-slot > .ui-auto-icon')) return;
 
     const icon = resolveIcon(el);
     if (!icon) return;
 
-    const img=makeIcon(icon);
-
-    const existingSlot = el.querySelector(':scope > .more-icon,:scope > .feature-icon,:scope > .menu-icon,:scope > .icon-box,:scope > .list-icon');
+    const existingSlot = findLegacyIconSlot(el);
     if(existingSlot){
-      existingSlot.textContent='';
+      let img = existingSlot.querySelector(':scope > .ui-auto-icon');
+      if(!img){
+        img = makeIcon(icon);
+        existingSlot.textContent='';
+        existingSlot.appendChild(img);
+      }else{
+        img.src = icon;
+      }
       existingSlot.classList.add('ui-icon-slot');
-      existingSlot.appendChild(img);
-    }else{
-      el.insertBefore(img, el.firstChild);
+      removeDirectDuplicateAutoIcons(el);
+      el.classList.add('ui-decorated','ui-icon-replaced');
+      return;
     }
 
+    const current = el.querySelector(':scope > .ui-auto-icon');
+    if(current){
+      current.src = icon;
+      removeDirectDuplicateAutoIcons(el,current);
+      el.classList.add('ui-decorated');
+      return;
+    }
+
+    const img=makeIcon(icon);
+    el.insertBefore(img, el.firstChild);
     el.classList.add('ui-decorated');
+
     const cls = String(el.className || '');
     if (/workflow-card|quick|action|shortcut|entry|tile|menu-card/i.test(cls)) {
       el.classList.add('ui-action-tile');
