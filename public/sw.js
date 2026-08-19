@@ -1,9 +1,9 @@
-const CACHE='mocui-v3.11.0-ui-icons-1.5.0';
+const CACHE='mocui-v3.11.0-data-safety-1.6.0';
 const CORE=[
   './','./index.html','./offline.html',
-  './app.css','./ui-icons.css?v=1.5.0','./ui-shell-stable.css',
-  './cloud.js','./qinsilk-import.js','./content-workbench.js',
-  './share.css','./share.js','./app.js','./ui-icons.js?v=1.4.0',
+  './app.css','./ui-icons.css?v=1.4.0','./ui-shell-stable.css',
+  './cloud.js','./data-safety.js?v=1.6.0','./qinsilk-import.js','./content-workbench.js',
+  './share.css','./share.js','./app.js','./trade-gallery-queue.js?v=1.6.0','./ui-icons.js?v=1.4.0',
   './ui-shell-guard.js','./pwa.js','./manifest.webmanifest',
   './icon-180.png','./icon-192.png','./icon-512.png'
 ];
@@ -21,4 +21,4 @@ self.addEventListener('fetch',event=>{
   if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
-// UI v1.5：二级业务页面收口 + 分类选择器布局修复。
+// v1.6：未同步数据保护 + 调货货源库可恢复后台上传队列。
