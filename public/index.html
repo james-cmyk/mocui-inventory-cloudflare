@@ -44,13 +44,14 @@
       <button id="bootRetry" class="boot-retry" type="button">重新连接</button>
     </div>
   </div>
+
   <div id="app">
     <header class="topbar">
       <div class="top-title-group">
         <button id="pageBack" class="page-back hidden ui-icon-only" type="button" aria-label="返回上一页">
           <img src="/assets/icons/common/ic_common_back.png" alt="" />
         </button>
-        <div><div class="brand">漠翠进销存</div><div id="pageSubtitle" class="subtitle">云端同步版</div></div>
+        <div><div class="brand">漠翠进销存</div><div id="pageSubtitle" class="subtitle">本机优先安全版</div></div>
       </div>
       <div class="top-actions">
         <span id="cloudBadge" class="cloud-badge checking">连接中</span>
@@ -59,7 +60,9 @@
         </button>
       </div>
     </header>
+
     <main id="main" class="main"></main>
+
     <nav class="bottom-nav" aria-label="主导航">
       <button data-route="dashboard" class="nav-item active"><span><img src="/assets/icons/navigation/ic_nav_home.png" alt="" /></span><b>概况</b></button>
       <button data-route="products" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_products.png" alt="" /></span><b>商品</b></button>
@@ -68,9 +71,18 @@
       <button data-route="more" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_more.png" alt="" /></span><b>更多</b></button>
     </nav>
   </div>
+
   <div id="modalRoot"></div><div id="toast" class="toast"></div>
-  <script src="pwa.js"></script><script src="cloud.js"></script><script src="data-safety.js?v=1.6.0"></script><script src="qinsilk-import.js"></script>
-  <script src="content-workbench.js"></script><script src="app.js"></script><script src="trade-gallery-queue.js?v=1.6.0"></script>
-  <script src="ui-icons.js?v=1.4.0"></script><script src="ui-shell-guard.js"></script>
+
+  <script src="pwa.js"></script>
+  <script src="cloud.js"></script>
+  <script src="data-safety.js?v=1.6.0"></script>
+  <script src="local-first-v2.js?v=2.0.0"></script>
+  <script src="qinsilk-import.js"></script>
+  <script src="content-workbench.js"></script>
+  <script src="app.js"></script>
+  <script src="trade-gallery-queue.js?v=1.6.0"></script>
+  <script src="ui-icons.js?v=1.4.0"></script>
+  <script src="ui-shell-guard.js"></script>
 </body>
 </html>
