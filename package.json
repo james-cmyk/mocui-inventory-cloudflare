@@ -1,12 +1,12 @@
 {
   "name": "mocui-inventory-cloudflare",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check src/index.js && wrangler deploy --dry-run",
+    "check": "node --check src/index.js && node --check src/index-v2.js && wrangler deploy --dry-run",
     "types": "wrangler types"
   },
   "devDependencies": {
