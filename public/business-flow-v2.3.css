@@ -1,0 +1,151 @@
+/* 漠翠进销存 v2.3 */
+.mocui-category-help{
+  margin-top:6px;
+  font-size:11px;
+  line-height:1.5;
+  color:#667085;
+}
+.mocui-category-required{
+  border-color:#d92d20!important;
+  box-shadow:0 0 0 3px rgba(217,45,32,.08)!important;
+}
+
+/* 首页：只保留核心经营数字 + 简短主功能 */
+#mocuiTodayLedgerBreakdown{display:none!important}
+body .mocui-home-actions{
+  margin:14px 0 18px;
+}
+body .mocui-home-action-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:9px;
+}
+body .mocui-home-action{
+  appearance:none;
+  border:1px solid #e4e7ec;
+  background:#fff;
+  color:#101828;
+  border-radius:14px;
+  min-height:58px;
+  padding:10px 6px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:15px;
+  font-weight:800;
+  letter-spacing:.02em;
+  box-shadow:0 1px 2px rgba(16,24,40,.03);
+}
+body .mocui-home-action#quickSale{
+  background:#101828;
+  color:#fff;
+  border-color:#101828;
+}
+body .mocui-home-action:active{
+  transform:scale(.97);
+}
+body[data-route="dashboard"] .metric .hint{
+  display:none!important;
+}
+
+/* 商品详情：销售 + 调借统一关联 */
+.mocui-product-relations{
+  margin-top:18px;
+}
+.mocui-relation-title{
+  margin:0 0 8px 2px;
+  font-size:14px;
+  font-weight:800;
+  color:#344054;
+}
+.mocui-relation-card{
+  overflow:hidden;
+  margin-bottom:10px;
+  border:1px solid #e4e7ec;
+  border-radius:14px;
+  background:#fff;
+}
+.mocui-relation-heading{
+  padding:10px 12px 8px;
+  border-bottom:1px solid #f0f2f5;
+  color:#667085;
+  font-size:11px;
+  font-weight:700;
+}
+.mocui-relation-row{
+  width:100%;
+  margin:0;
+  border:0;
+  border-bottom:1px solid #f2f4f7;
+  background:#fff;
+  color:#101828;
+  padding:11px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  text-align:left;
+}
+.mocui-relation-row:last-child{
+  border-bottom:0;
+}
+button.mocui-relation-row:active{
+  background:#f9fafb;
+}
+.mocui-relation-row.overdue{
+  background:#fff7f6;
+}
+.mocui-relation-row.overdue .mocui-relation-side span{
+  color:#b42318;
+}
+.mocui-relation-main{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.mocui-relation-main strong{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+}
+.mocui-relation-main span{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:10px;
+  color:#667085;
+}
+.mocui-relation-side{
+  flex:0 0 auto;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:3px;
+}
+.mocui-relation-side b{
+  font-size:13px;
+  font-variant-numeric:tabular-nums;
+}
+.mocui-relation-side span{
+  font-size:10px;
+  color:#667085;
+}
+.mocui-relation-empty{
+  padding:14px 12px;
+  color:#98a2b3;
+  font-size:12px;
+}
+
+@media(max-width:420px){
+  body .mocui-home-action-grid{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:7px;
+  }
+  body .mocui-home-action{
+    min-height:54px;
+    border-radius:12px;
+    font-size:14px;
+  }
+}
