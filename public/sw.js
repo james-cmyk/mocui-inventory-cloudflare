@@ -1,9 +1,49 @@
-const CACHE='mocui-v3.1.7-more-core-safe';
-const CORE=['./','./index.html','./offline.html','./app.css','./ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./business-flow-v2.3.css?v=2.3.0','./ui-refine-v2.4.css?v=2.4.0','./performance-v3.css?v=3.0.0','./cloud.js','./sync-v3.js?v=3.0.0','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.0.0','./performance-v3.js?v=3.0.0','./trade-gallery-queue.js?v=1.6.0','./business-ux-v2.js?v=2.2.0','./business-flow-v2.3.js?v=2.3.0','./ui-refine-v2.4.1.js?v=2.4.2','./ui-icons.js?v=1.4.0','./ui-shell-guard.js','./product-fast-index-v3.1.js?v=3.1.0','./product-fast-index-v3.1.css?v=3.1.0','./detail-more-fix-v3.1.1.js?v=3.1.7','./detail-more-fix-v3.1.1.css?v=3.1.7','./loan-order-v3.1.2.js?v=3.1.2','./loan-order-v3.1.2.css?v=3.1.2','./pwa.js?v=2.2.0','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
-self.addEventListener('install',e=>{self.skipWaiting();e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)))});
-self.addEventListener('message',e=>{if(e.data?.type==='SKIP_WAITING')self.skipWaiting()});
-self.addEventListener('activate',e=>{e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))]))});
-async function updateCache(request,key=request){try{const r=await fetch(request,{cache:'no-store'});if(r.ok)(await caches.open(CACHE)).put(key,r.clone());return r}catch{return null}}
-async function appShell(request,event){const cached=(await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'));if(cached){event.waitUntil(updateCache(request,'./index.html'));return cached}return(await updateCache(request,'./index.html'))||(await caches.match('./offline.html'))||Response.error()}
-async function swr(request,event){const cached=await caches.match(request),network=updateCache(request);if(cached){event.waitUntil(network);return cached}return(await network)||Response.error()}
-self.addEventListener('fetch',event=>{const u=new URL(event.request.url);if(event.request.method!=='GET'||u.origin!==self.location.origin||u.pathname.startsWith('/api/'))return;if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return}if(/\.(?:js|css|webmanifest)$/i.test(u.pathname)){event.respondWith(swr(event.request,event));return}event.respondWith(caches.match(event.request).then(c=>c||updateCache(event.request).then(r=>r||Response.error())))});
+const CACHE='mocui-v3.12.0-accessory-inventory';
+const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+
+self.addEventListener('install',event=>{
+  event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
+});
+
+self.addEventListener('message',event=>{
+  if(event.data?.type==='SKIP_WAITING') self.skipWaiting();
+});
+
+self.addEventListener('activate',event=>{
+  event.waitUntil(Promise.all([
+    self.clients.claim(),
+    caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))),
+  ]));
+});
+
+async function updateCache(request,cacheKey=request){
+  try{
+    const response=await fetch(request,{cache:'no-store'});
+    if(response.ok){const cache=await caches.open(CACHE);await cache.put(cacheKey,response.clone());}
+    return response;
+  }catch{return null;}
+}
+
+async function appShell(request,event){
+  const cached=(await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'));
+  if(cached){event.waitUntil(updateCache(request,'./index.html'));return cached;}
+  return (await updateCache(request,'./index.html'))||(await caches.match('./offline.html'))||Response.error();
+}
+
+async function staleWhileRevalidate(request,event){
+  const cached=await caches.match(request);
+  const network=updateCache(request);
+  if(cached){event.waitUntil(network);return cached;}
+  return (await network)||Response.error();
+}
+
+self.addEventListener('fetch',event=>{
+  const url=new URL(event.request.url);
+  if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')) return;
+  if(event.request.mode==='navigate'&&url.pathname==='/share.html'){event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match('./share.html')||Response.error()));return;}
+  if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return;}
+  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
+  event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
+});
+
+// v3.12.0：新增高价值配饰独立库存；销售自动扣减/撤销退回/恢复重扣；低价值配饰与其他直接成本并入核心毛利；不升级 IndexedDB schema，不迁移旧数据

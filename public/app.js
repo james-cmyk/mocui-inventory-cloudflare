@@ -4,7 +4,7 @@ const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
 const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans','trade-gallery':'more'};
+const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans','trade-gallery':'more',accessories:'settings'};
 let db;
 let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, passDealDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
@@ -669,7 +669,7 @@ async function render(){
     dashboard:renderDashboard, products:renderProducts, 'product-detail':renderProductDetail,
     'sale-new':renderSaleNew, sales:renderSales, loans:renderLoans, reports:renderReports,
     'pass-deals':renderPassDeals, 'pass-deal-new':renderPassDealNew, 'external-goods':renderExternalGoods, 'trade-gallery':renderTradeGallery,
-    more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
+    more:renderMore, content:renderContentHub, 'product-content':renderProductContent, 'shortcut-setup':renderShortcutSetup, customers:renderCustomers, stocktake:renderStocktake, ledger:renderLedger, accessories:renderAccessories, settings:renderSettings, audit:renderAuditLogs, health:renderInventoryHealth, 'qinsilk-import':renderQinsilkImport
   };
   try{ await (routes[appState.route]||renderDashboard)(); }catch(err){ console.error(err); $('#main').innerHTML=`<div class="notice danger">页面加载失败：${esc(err.message)}</div>`; }
 }
@@ -887,13 +887,97 @@ function openDateRangePicker(callback){
   openModal('自定义时间',`<div class="form-row"><div class="form-group"><label class="form-label">开始日期</label><input id="customStart" class="input" type="date"></div><div class="form-group"><label class="form-label">结束日期</label><input id="customEnd" class="input" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div><button id="applyCustomRange" class="btn block">确定</button>`,{onOpen:()=>{$('#applyCustomRange').onclick=()=>{const s=$('#customStart').value,e=$('#customEnd').value;if(!s||!e){showToast('请选择开始和结束日期');return;}closeModal();callback(s,e);};}});
 }
 
+// ===== v3.12 配饰库存（高价值配饰） =====
+// 使用 settings 中的单一账本记录，避免升级 IndexedDB schema；现有备份/同步链路可直接兼容。
+const ACCESSORY_LEDGER_ID='accessoryInventoryV1';
+function normalizeAccessoryLedger(row){
+  const x=row&&typeof row==='object'?row:{};
+  return {id:ACCESSORY_LEDGER_ID,version:1,items:Array.isArray(x.items)?x.items:[],moves:Array.isArray(x.moves)?x.moves:[],updatedAt:x.updatedAt||''};
+}
+async function getAccessoryLedger(){return normalizeAccessoryLedger(await dbGet('settings',ACCESSORY_LEDGER_ID));}
+async function putAccessoryLedger(ledger){ledger=normalizeAccessoryLedger(ledger);ledger.updatedAt=nowISO();await dbPut('settings',ledger);return ledger;}
+function accessoryActiveItems(ledger){return (ledger?.items||[]).filter(x=>x.archived!==true);}
+function accessoryUsageCost(usages){return (usages||[]).reduce((s,u)=>s+n(u.qty)*n(u.unitCost),0);}
+function accessoryMoveExists(ledger,accessoryId,type,refId){return (ledger?.moves||[]).some(m=>m.accessoryId===accessoryId&&m.type===type&&m.refId===refId);}
+function lastAccessorySaleMove(ledger,accessoryId,refId){const rows=ledger?.moves||[];for(let i=rows.length-1;i>=0;i--){const m=rows[i];if(m.accessoryId===accessoryId&&m.refId===refId&&['sale','sale_cancel','sale_restore'].includes(m.type))return m;}return null;}
+function accessoryRefId(saleId,accessoryId){return `${saleId}:${accessoryId}`;}
+async function validateAccessoryUsages(usages){
+  if(!(usages||[]).length)return;
+  const ledger=await getAccessoryLedger(),byId=new Map(ledger.items.map(x=>[x.id,x]));
+  for(const u of usages){const a=byId.get(u.accessoryId);if(!a||a.archived)throw new Error(`配饰 ${u.name||''} 已不存在或已停用`);if(n(u.qty)<=0)throw new Error(`${a.name} 使用数量必须大于0`);if(n(a.stock)<n(u.qty))throw new Error(`${a.name} 配饰库存不足：库存 ${fmtInt(a.stock)}，需要 ${fmtInt(u.qty)}`);}
+}
+async function applyAccessorySale(usages,saleId,orderNo,createdAt=nowISO()){
+  if(!(usages||[]).length)return;
+  const ledger=await getAccessoryLedger(),byId=new Map(ledger.items.map(x=>[x.id,x]));
+  for(const u of usages){
+    const a=byId.get(u.accessoryId);if(!a)throw new Error(`配饰 ${u.name||''} 不存在`);
+    const refId=accessoryRefId(saleId,a.id),last=lastAccessorySaleMove(ledger,a.id,refId);if(last&&last.type!=='sale_cancel')continue;
+    const before=n(a.stock),after=before-n(u.qty);if(after<0)throw new Error(`${a.name} 配饰库存不足`);
+    a.stock=after;a.updatedAt=nowISO();
+    ledger.moves.push({id:uid('accmove'),accessoryId:a.id,sku:a.sku||'',name:a.name,type:'sale',qtyChange:-n(u.qty),beforeStock:before,afterStock:after,unitCost:n(u.unitCost),refType:'sale',refId,note:`销售单 ${orderNo}`,createdAt});
+  }
+  await putAccessoryLedger(ledger);
+}
+async function cancelAccessorySale(sale){
+  const usages=sale?.accessoryUsages||[];if(!usages.length)return;
+  const ledger=await getAccessoryLedger(),byId=new Map(ledger.items.map(x=>[x.id,x]));
+  for(const u of usages){
+    const a=byId.get(u.accessoryId);if(!a)continue;
+    const refId=accessoryRefId(sale.id,a.id),last=lastAccessorySaleMove(ledger,a.id,refId);if(!last||last.type==='sale_cancel')continue;
+    const before=n(a.stock),after=before+n(u.qty);a.stock=after;a.updatedAt=nowISO();
+    ledger.moves.push({id:uid('accmove'),accessoryId:a.id,sku:a.sku||'',name:a.name,type:'sale_cancel',qtyChange:n(u.qty),beforeStock:before,afterStock:after,unitCost:n(u.unitCost),refType:'sale',refId,note:`撤销销售单 ${sale.orderNo}`,createdAt:nowISO()});
+  }
+  await putAccessoryLedger(ledger);
+}
+async function restoreAccessorySale(sale){
+  const usages=sale?.accessoryUsages||[];if(!usages.length)return;
+  const ledger=await getAccessoryLedger(),byId=new Map(ledger.items.map(x=>[x.id,x]));
+  for(const u of usages){const a=byId.get(u.accessoryId);if(!a)throw new Error(`配饰 ${u.name||''} 已不存在`);const refId=accessoryRefId(sale.id,a.id),last=lastAccessorySaleMove(ledger,a.id,refId);if(!last||last.type!=='sale_cancel')continue;if(n(a.stock)<n(u.qty))throw new Error(`${a.name} 配饰库存不足：库存 ${fmtInt(a.stock)}，恢复销售需要 ${fmtInt(u.qty)}`);}
+  for(const u of usages){
+    const a=byId.get(u.accessoryId),refId=accessoryRefId(sale.id,a.id),last=lastAccessorySaleMove(ledger,a.id,refId);if(!last||last.type!=='sale_cancel')continue;
+    const before=n(a.stock),after=before-n(u.qty);a.stock=after;a.updatedAt=nowISO();
+    ledger.moves.push({id:uid('accmove'),accessoryId:a.id,sku:a.sku||'',name:a.name,type:'sale_restore',qtyChange:-n(u.qty),beforeStock:before,afterStock:after,unitCost:n(u.unitCost),refType:'sale',refId,note:`恢复销售单 ${sale.orderNo}`,createdAt:nowISO()});
+  }
+  await putAccessoryLedger(ledger);
+}
+function accessoryUsageRowsHTML(d){
+  const rows=d.accessoryUsages||[];
+  return rows.length?rows.map((u,idx)=>`<div class="list-item accessory-sale-row" data-index="${idx}"><div class="item-main"><div class="item-title">${esc(u.name)}</div><div class="item-meta">${esc(u.sku||'')} · 库存 ${fmtInt(u.stock)} · 成本 ${fmtMoney(u.unitCost)}/${esc(u.unit||'件')}</div></div><div style="width:78px"><input class="mini-input accessory-sale-qty" type="number" min="0.01" max="${n(u.stock)}" step="0.01" value="${n(u.qty)}"></div><button class="btn small danger remove-accessory-sale" type="button">删除</button></div>`).join(''):emptyState('◇','未选择库存配饰','金扣、珠子等高价值配饰可从库存选择；低价值绳子/包装直接填成本。');
+}
+async function openAccessorySelector(selectedIds,callback){
+  const ledger=await getAccessoryLedger(),items=accessoryActiveItems(ledger).filter(x=>n(x.stock)>0),selected=new Set(selectedIds||[]);
+  openModal('选择库存配饰',`<div class="toolbar"><div class="search"><input id="accessorySelectSearch" placeholder="名称、编码、类别"></div></div><div id="accessorySelectList" class="list"></div><div class="sticky-actions"><button id="accessorySelectConfirm" class="btn block">确定选择（${selected.size}）</button></div>`,{full:true,onOpen:()=>{
+    const draw=()=>{const q=$('#accessorySelectSearch').value.trim().toLowerCase(),rows=items.filter(a=>!q||[a.name,a.sku,a.category].some(v=>String(v||'').toLowerCase().includes(q)));$('#accessorySelectList').innerHTML=rows.length?rows.map(a=>`<label class="list-item"><input class="accessory-selector-check" type="checkbox" data-id="${a.id}" ${selected.has(a.id)?'checked':''}><div class="thumb placeholder">配</div><div class="item-main"><div class="item-title">${esc(a.name)}</div><div class="item-meta">${esc(a.sku||'无编码')} · ${esc(a.category||'未分类')} · 库存 ${fmtInt(a.stock)} ${esc(a.unit||'件')}</div></div><div class="item-right"><strong>${fmtMoney(a.unitCost)}</strong></div></label>`).join(''):emptyState('◇','暂无可用配饰','请先到 设置 → 配饰库存 入库');$$('.accessory-selector-check').forEach(c=>c.onchange=()=>{c.checked?selected.add(c.dataset.id):selected.delete(c.dataset.id);$('#accessorySelectConfirm').textContent=`确定选择（${selected.size}）`;});};
+    draw();$('#accessorySelectSearch').oninput=draw;$('#accessorySelectConfirm').onclick=()=>{const rows=items.filter(a=>selected.has(a.id));closeModal();callback(rows);};
+  }});
+}
+async function renderAccessories(){
+  setHeader('配饰库存','高价值配饰独立库存 · 销售自动扣减',{label:'＋',onClick:()=>openAccessoryForm()});
+  const ledger=await getAccessoryLedger(),items=accessoryActiveItems(ledger).sort((a,b)=>String(a.name).localeCompare(String(b.name),'zh-CN'));
+  const totalQty=items.reduce((s,a)=>s+n(a.stock),0),totalCost=items.reduce((s,a)=>s+n(a.stock)*n(a.unitCost),0);
+  $('#main').innerHTML=`<div class="notice success"><strong>独立配饰账</strong><br>金扣、珠子等高价值配饰在这里管理；销售开单时选择后自动扣库存并计入实际毛利。低价值绳子、包装仍可直接填写配饰成本。</div><div class="grid-3"><div class="metric compact"><div class="label">配饰SKU</div><div class="value">${items.length}</div></div><div class="metric compact"><div class="label">库存数量</div><div class="value">${fmtInt(totalQty)}</div></div><div class="metric compact"><div class="label">库存成本</div><div class="value">${fmtMoney(totalCost)}</div></div></div><div class="toolbar" style="margin-top:12px"><div class="search"><input id="accessorySearch" placeholder="名称、编码、类别"></div></div><div id="accessoryList" class="list"></div><div class="section-title">最近流水 <small>最近30条</small></div><div class="timeline">${[...(ledger.moves||[])].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,30).map(m=>`<div class="timeline-item"><div class="time">${fmtDateTime(m.createdAt)}</div><div class="text">${esc(m.name)}　<strong class="${n(m.qtyChange)>=0?'success-text':'danger-text'}">${n(m.qtyChange)>=0?'+':''}${fmtInt(m.qtyChange)}</strong>　${fmtInt(m.beforeStock)} → ${fmtInt(m.afterStock)}</div><div class="item-meta">${esc(m.note||'')}</div></div>`).join('')||emptyState('≡','暂无配饰流水')}</div>`;
+  const draw=()=>{const q=$('#accessorySearch').value.trim().toLowerCase(),rows=items.filter(a=>!q||[a.name,a.sku,a.category,a.note].some(v=>String(v||'').toLowerCase().includes(q)));$('#accessoryList').innerHTML=rows.length?rows.map(a=>`<div class="list-item accessory-row" data-id="${a.id}"><div class="thumb placeholder">配</div><div class="item-main"><div class="item-title">${esc(a.name)}</div><div class="item-meta">${esc(a.sku||'无编码')} · ${esc(a.category||'未分类')} · ${fmtMoney(a.unitCost)}/${esc(a.unit||'件')}</div></div><div class="item-right"><strong>库存 ${fmtInt(a.stock)}</strong><div class="btn-row"><button class="btn small secondary accessory-stock" data-id="${a.id}">入/出库</button><button class="btn small secondary accessory-edit" data-id="${a.id}">编辑</button></div></div></div>`).join(''):emptyState('◇','暂无配饰','点击右上角＋新增');$$('.accessory-stock').forEach(b=>b.onclick=e=>{e.stopPropagation();openAccessoryStock(b.dataset.id);});$$('.accessory-edit').forEach(b=>b.onclick=e=>{e.stopPropagation();openAccessoryForm(b.dataset.id);});};draw();$('#accessorySearch').oninput=draw;
+}
+async function nextAccessorySku(){const ledger=await getAccessoryLedger(),max=ledger.items.reduce((m,a)=>Math.max(m,Number(String(a.sku||'').replace(/\D/g,''))||0),0);return `PS${String(max+1).padStart(5,'0')}`;}
+async function openAccessoryForm(id=''){
+  const ledger=await getAccessoryLedger(),a=ledger.items.find(x=>x.id===id),sku=a?.sku||await nextAccessorySku();
+  openModal(a?'编辑配饰':'新增配饰',`<form id="accessoryForm"><div class="form-row"><div class="form-group"><label class="form-label">配饰名称 *</label><input name="name" class="input" required value="${esc(a?.name||'')}"></div><div class="form-group"><label class="form-label">编码</label><input name="sku" class="input" value="${esc(sku)}"></div></div><div class="form-row"><div class="form-group"><label class="form-label">类别</label><input name="category" class="input" placeholder="金扣、珠子、配件" value="${esc(a?.category||'')}"></div><div class="form-group"><label class="form-label">单位</label><input name="unit" class="input" value="${esc(a?.unit||'件')}"></div></div><div class="form-group"><label class="form-label">单位成本</label><input name="unitCost" class="input" type="number" min="0" step="0.01" value="${n(a?.unitCost)}"></div>${a?'':`<div class="form-group"><label class="form-label">初始库存</label><input name="stock" class="input" type="number" min="0" step="0.01" value="0"></div>`}<div class="form-group"><label class="form-label">备注</label><textarea name="note" class="textarea">${esc(a?.note||'')}</textarea></div><button class="btn block" type="submit">保存配饰</button>${a?`<button id="archiveAccessory" class="btn danger block" type="button" style="margin-top:8px">停用此配饰</button>`:''}</form>`,{onOpen:()=>{
+    $('#accessoryForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),name=String(fd.get('name')||'').trim();if(!name){showToast('请填写配饰名称');return;}const current=await getAccessoryLedger();let row=current.items.find(x=>x.id===id);if(row){row.name=name;row.sku=String(fd.get('sku')||'').trim();row.category=String(fd.get('category')||'').trim();row.unit=String(fd.get('unit')||'件').trim()||'件';row.unitCost=Math.max(0,n(fd.get('unitCost')));row.note=String(fd.get('note')||'').trim();row.updatedAt=nowISO();}else{const stock=Math.max(0,n(fd.get('stock')));row={id:uid('acc'),name,sku:String(fd.get('sku')||'').trim(),category:String(fd.get('category')||'').trim(),unit:String(fd.get('unit')||'件').trim()||'件',unitCost:Math.max(0,n(fd.get('unitCost'))),stock,note:String(fd.get('note')||'').trim(),archived:false,createdAt:nowISO(),updatedAt:nowISO()};current.items.push(row);if(stock)current.moves.push({id:uid('accmove'),accessoryId:row.id,sku:row.sku,name:row.name,type:'initial',qtyChange:stock,beforeStock:0,afterStock:stock,unitCost:row.unitCost,refType:'accessory',refId:row.id,note:'配饰初始库存',createdAt:nowISO()});}await putAccessoryLedger(current);await writeAudit(a?'accessory.edit':'accessory.create','accessory',row.id,`${row.name} · 库存 ${fmtInt(row.stock)}`,a||null,row);closeModal();showToast('配饰已保存');renderAccessories();};
+    if($('#archiveAccessory'))$('#archiveAccessory').onclick=async()=>{const current=await getAccessoryLedger(),row=current.items.find(x=>x.id===id);if(!row)return;if(n(row.stock)>0){showToast('库存不为0，不能停用；请先做出库调整');return;}if(!await confirmDialog('停用后不会删除历史销售和流水，确定继续？'))return;row.archived=true;row.updatedAt=nowISO();await putAccessoryLedger(current);closeModal();showToast('配饰已停用');renderAccessories();};
+  }});
+}
+async function openAccessoryStock(id){
+  const ledger=await getAccessoryLedger(),a=ledger.items.find(x=>x.id===id);if(!a)return;
+  openModal('配饰入/出库',`<form id="accessoryStockForm"><div class="notice">${esc(a.name)} · 当前库存 ${fmtInt(a.stock)} ${esc(a.unit||'件')}</div><div class="form-group"><label class="form-label">操作</label><select name="direction" class="select"><option value="in">采购/补充入库</option><option value="out">手工出库/损耗</option></select></div><div class="form-group"><label class="form-label">数量</label><input name="qty" class="input" type="number" min="0.01" step="0.01" required></div><div class="form-group"><label class="form-label">本批单位成本</label><input name="unitCost" class="input" type="number" min="0" step="0.01" value="${n(a.unitCost)}"><div class="field-help">入库时按移动加权平均更新库存单位成本；出库不改变单位成本。</div></div><div class="form-group"><label class="form-label">备注</label><textarea name="note" class="textarea" placeholder="采购来源、损耗原因等"></textarea></div><button class="btn block" type="submit">确认保存</button></form>`,{onOpen:()=>{$('#accessoryStockForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),qty=n(fd.get('qty')),direction=String(fd.get('direction'));if(qty<=0){showToast('数量必须大于0');return;}const current=await getAccessoryLedger(),row=current.items.find(x=>x.id===id);if(!row)return;const before=n(row.stock);if(direction==='out'&&before<qty){showToast(`库存不足，当前 ${fmtInt(before)}`);return;}let after=before,change=0,type='manual_out';if(direction==='in'){const batchCost=Math.max(0,n(fd.get('unitCost')));after=before+qty;row.unitCost=after>0?((before*n(row.unitCost)+qty*batchCost)/after):batchCost;change=qty;type='purchase';}else{after=before-qty;change=-qty;}row.stock=after;row.updatedAt=nowISO();const move={id:uid('accmove'),accessoryId:row.id,sku:row.sku||'',name:row.name,type,qtyChange:change,beforeStock:before,afterStock:after,unitCost:n(row.unitCost),refType:'manual',refId:uid('accmanual'),note:String(fd.get('note')||'').trim(),createdAt:nowISO()};current.moves.push(move);await putAccessoryLedger(current);await writeAudit(`accessory.${type}`,'accessory',row.id,`${row.name} 库存 ${fmtInt(before)} → ${fmtInt(after)}`,{stock:before},{stock:after,unitCost:row.unitCost,note:move.note});closeModal();showToast('配饰库存已更新');renderAccessories();};}});
+}
+
 async function renderSaleNew(){
   setHeader('销售开单','多选商品、修改数量和单价');
   if(!appState.saleDraft){
     const pending=loadLocalDraft('mocui_sale_core_pending_v1');
     if(pending?.__coreSaleId&&pending?.items?.length){appState.saleDraft=pending;showToast('已恢复上次未完成的销售开单');}
     else{
-      appState.saleDraft={customerId:'',customerName:'',createdAt:localInputDateTime(),items:[],discountType:'none',discountValue:0,received:'',note:''};
+      appState.saleDraft={customerId:'',customerName:'',createdAt:localInputDateTime(),items:[],accessoryUsages:[],directAccessoryCost:0,otherDirectCost:0,discountType:'none',discountValue:0,received:'',note:''};
       if(appState.params.productId){const p=await dbGet('products',appState.params.productId);if(p)appState.saleDraft.items.push({productId:p.id,productName:p.name,productCode:p.code,color:p.color,qty:1,price:n(p.salePrice),costPrice:n(p.costPrice),image:p.image,stock:n(p.stock),productNote:p.note||'',itemNote:''});}
     }
   }
@@ -902,31 +986,27 @@ async function renderSaleNew(){
   customers.forEach(c=>customerHistory.set(c.name,{id:c.id,name:c.name,phone:c.phone||'',orders:0,lastDate:c.updatedAt||c.createdAt||''}));
   sales.forEach(order=>{const name=String(order.customerName||'').trim();if(!name||name==='散客')return;const old=customerHistory.get(name)||{id:order.customerId||'',name,phone:'',orders:0,lastDate:order.createdAt};old.orders+=1;if(!old.lastDate||new Date(order.createdAt)>new Date(old.lastDate))old.lastDate=order.createdAt;customerHistory.set(name,old);});
   const customerRows=[...customerHistory.values()].sort((a,b)=>new Date(b.lastDate||0)-new Date(a.lastDate||0));
-  const d=appState.saleDraft, totals=calcSaleTotals(d);
+  const d=appState.saleDraft;d.accessoryUsages=Array.isArray(d.accessoryUsages)?d.accessoryUsages:[];d.directAccessoryCost=Math.max(0,n(d.directAccessoryCost??d.accessoryCost));d.otherDirectCost=Math.max(0,n(d.otherDirectCost));
+  const totals=calcSaleTotals(d),inventoryAccessoryCost=accessoryUsageCost(d.accessoryUsages),productCost=d.items.reduce((s,i)=>s+n(i.costPrice)*n(i.qty),0),estimatedProfit=totals.finalAmount-productCost-inventoryAccessoryCost-n(d.directAccessoryCost)-n(d.otherDirectCost);
   $('#main').innerHTML=`
-    <div class="card">
-      <div class="form-group autocomplete"><label class="form-label">客户</label><div class="form-row" style="grid-template-columns:1fr auto"><input id="saleCustomer" class="input" value="${esc(d.customerName)}" placeholder="输入一个字匹配历史客户"><button id="chooseCustomer" class="btn secondary">选择</button></div><div id="saleCustomerSuggestions" class="autocomplete-list hidden"></div><div class="field-help">输入姓名任意一个字，会显示历史客户；也可以直接输入新客户。</div></div><div class="form-group"><label class="form-label">销售时间</label><input id="saleDate" class="input" type="datetime-local" value="${esc(d.createdAt)}"></div>
-      <button id="chooseProducts" class="btn block secondary">＋ 选择商品（可多选）</button>
-    </div>
+    <div class="card"><div class="form-group autocomplete"><label class="form-label">客户</label><div class="form-row" style="grid-template-columns:1fr auto"><input id="saleCustomer" class="input" value="${esc(d.customerName)}" placeholder="输入一个字匹配历史客户"><button id="chooseCustomer" class="btn secondary">选择</button></div><div id="saleCustomerSuggestions" class="autocomplete-list hidden"></div><div class="field-help">输入姓名任意一个字，会显示历史客户；也可以直接输入新客户。</div></div><div class="form-group"><label class="form-label">销售时间</label><input id="saleDate" class="input" type="datetime-local" value="${esc(d.createdAt)}"></div><button id="chooseProducts" class="btn block secondary">＋ 选择商品（可多选）</button></div>
     <div id="saleItems">${d.items.length?d.items.map((i,idx)=>saleLineHTML(i,idx)).join(''):emptyState('＋','还没有选择商品','点击上方按钮添加')}</div>
-    <div class="card">
-      <div class="form-row"><div class="form-group"><label class="form-label">优惠方式</label><select id="discountType" class="select"><option value="none" ${d.discountType==='none'?'selected':''}>无优惠</option><option value="amount" ${d.discountType==='amount'?'selected':''}>优惠金额</option><option value="percent" ${d.discountType==='percent'?'selected':''}>折扣百分比</option><option value="round" ${d.discountType==='round'?'selected':''}>抹零</option></select></div><div class="form-group"><label id="discountLabel" class="form-label">优惠值</label><input id="discountValue" class="input" type="number" min="0" step="0.01" value="${n(d.discountValue)}"></div></div>
-      <div class="form-group"><label class="form-label">本次实收</label><input id="received" class="input" type="number" min="0" step="0.01" value="${d.received===''?totals.finalAmount:n(d.received)}"></div>
-      <div class="form-group"><label class="form-label">销售备注</label><textarea id="saleNote" class="textarea">${esc(d.note)}</textarea></div>
-      <div class="total-box"><div class="total-row"><span>商品金额</span><strong>${fmtMoney(totals.subtotal)}</strong></div><div class="total-row"><span>优惠/抹零</span><strong>-${fmtMoney(totals.discountAmount)}</strong></div><div class="total-row grand"><span>应收</span><strong>${fmtMoney(totals.finalAmount)}</strong></div></div>
-      <button id="saveSale" class="btn block" ${d.items.length?'':'disabled'}>确认开单并扣减库存</button>
-      <button id="viewSales" class="btn block secondary" style="margin-top:8px">查看销售单 / 撤销恢复</button>
-    </div>`;
+    <div class="card"><div class="card-title">配饰与直接成本</div><button id="chooseAccessories" class="btn secondary block">＋ 选择库存配饰</button><div id="saleAccessoryRows" class="list" style="margin-top:8px">${accessoryUsageRowsHTML(d)}</div><div class="form-row"><div class="form-group"><label class="form-label">低价值配饰成本</label><input id="saleDirectAccessoryCost" class="input" type="number" min="0" step="0.01" value="${n(d.directAccessoryCost)}" placeholder="绳子、包装等"></div><div class="form-group"><label class="form-label">其他直接成本</label><input id="saleOtherDirectCost" class="input" type="number" min="0" step="0.01" value="${n(d.otherDirectCost)}" placeholder="加工、证书等"></div></div><div class="notice">库存配饰成本 ${fmtMoney(inventoryAccessoryCost)} · 商品成本 ${fmtMoney(productCost)} · 预计毛利 <strong>${fmtMoney(estimatedProfit)}</strong></div></div>
+    <div class="card"><div class="form-row"><div class="form-group"><label class="form-label">优惠方式</label><select id="discountType" class="select"><option value="none" ${d.discountType==='none'?'selected':''}>无优惠</option><option value="amount" ${d.discountType==='amount'?'selected':''}>优惠金额</option><option value="percent" ${d.discountType==='percent'?'selected':''}>折扣百分比</option><option value="round" ${d.discountType==='round'?'selected':''}>抹零</option></select></div><div class="form-group"><label id="discountLabel" class="form-label">优惠值</label><input id="discountValue" class="input" type="number" min="0" step="0.01" value="${n(d.discountValue)}"></div></div><div class="form-group"><label class="form-label">本次实收</label><input id="received" class="input" type="number" min="0" step="0.01" value="${d.received===''?totals.finalAmount:n(d.received)}"></div><div class="form-group"><label class="form-label">销售备注</label><textarea id="saleNote" class="textarea">${esc(d.note)}</textarea></div><div class="total-box"><div class="total-row"><span>商品金额</span><strong>${fmtMoney(totals.subtotal)}</strong></div><div class="total-row"><span>优惠/抹零</span><strong>-${fmtMoney(totals.discountAmount)}</strong></div><div class="total-row grand"><span>应收</span><strong>${fmtMoney(totals.finalAmount)}</strong></div></div><button id="saveSale" class="btn block" ${d.items.length?'':'disabled'}>确认开单并扣减库存</button><button id="viewSales" class="btn block secondary" style="margin-top:8px">查看销售单 / 撤销恢复</button></div>`;
   bindSaleDraft(customerRows);
 }
+
 function saleLineHTML(i,idx){
   return `<div class="sale-line" data-index="${idx}"><div class="sale-line-top"><div><div class="sale-line-name">${esc(i.productName)}</div><div class="item-meta">${esc(i.productCode)} · ${esc(i.color||'')} · 可售 ${fmtInt(i.stock)}</div>${i.productNote?`<div class="loan-product-note">商品备注：${esc(i.productNote)}</div>`:''}</div><button class="btn small danger remove-sale-item">删除</button></div><div class="sale-line-grid"><div><div class="mini-label">数量</div><input class="mini-input line-qty" type="number" min="0.01" step="0.01" value="${n(i.qty)}"></div><div><div class="mini-label">销售单价</div><input class="mini-input line-price" type="number" min="0" step="0.01" value="${n(i.price)}"></div><div><div class="mini-label">小计</div><div style="padding:9px 2px;font-weight:800">${fmtMoney(n(i.qty)*n(i.price))}</div></div></div><div class="form-group" style="margin:9px 0 0"><label class="mini-label">本件商品备注</label><input class="input line-item-note" value="${esc(i.itemNote||'')}" placeholder="本次销售的商品情况、证书、瑕疵说明等"></div></div>`;
 }
 function syncSaleFormToDraft(){
   const d=appState.saleDraft;if(!d)return;
-  d.customerName=$('#saleCustomer')?.value.trim()||''; d.createdAt=$('#saleDate')?.value||localInputDateTime(); d.discountType=$('#discountType')?.value||'none'; d.discountValue=n($('#discountValue')?.value); d.received=$('#received')?.value??''; d.note=$('#saleNote')?.value||'';
+  d.customerName=$('#saleCustomer')?.value.trim()||'';d.createdAt=$('#saleDate')?.value||localInputDateTime();d.discountType=$('#discountType')?.value||'none';d.discountValue=n($('#discountValue')?.value);d.received=$('#received')?.value??'';d.note=$('#saleNote')?.value||'';
+  d.directAccessoryCost=Math.max(0,n($('#saleDirectAccessoryCost')?.value??d.directAccessoryCost));d.otherDirectCost=Math.max(0,n($('#saleOtherDirectCost')?.value??d.otherDirectCost));
   $$('.sale-line').forEach(el=>{const i=d.items[n(el.dataset.index)];if(i){i.qty=n($('.line-qty',el).value);i.price=n($('.line-price',el).value);i.itemNote=$('.line-item-note',el)?.value||'';}});
+  $$('.accessory-sale-row').forEach(el=>{const u=d.accessoryUsages?.[n(el.dataset.index)];if(u)u.qty=n($('.accessory-sale-qty',el)?.value);});
 }
+
 function bindSaleDraft(customerRows=[]){
   $('#chooseProducts').onclick=()=>{syncSaleFormToDraft();openProductSelector(appState.saleDraft.items.map(i=>i.productId),selected=>{const existing=new Map(appState.saleDraft.items.map(i=>[i.productId,i]));appState.saleDraft.items=selected.map(p=>existing.get(p.id)||{productId:p.id,productName:p.name,productCode:p.code,color:p.color,qty:1,price:n(p.salePrice),costPrice:n(p.costPrice),image:p.image,stock:n(p.stock),productNote:p.note||'',itemNote:''});renderSaleNew();});};
   $('#chooseCustomer').onclick=()=>openCustomerSelector(c=>{$('#saleCustomer').value=c.name;appState.saleDraft.customerId=c.id;appState.saleDraft.customerName=c.name;});
@@ -938,6 +1018,10 @@ function bindSaleDraft(customerRows=[]){
     $$('.mini-input',el).forEach(x=>x.onchange=()=>{syncSaleFormToDraft();renderSaleNew();});
   });
   ['discountType','discountValue'].forEach(id=>$('#'+id).onchange=()=>{syncSaleFormToDraft();renderSaleNew();});
+  $('#chooseAccessories').onclick=()=>{syncSaleFormToDraft();openAccessorySelector((appState.saleDraft.accessoryUsages||[]).map(x=>x.accessoryId),selected=>{const existing=new Map((appState.saleDraft.accessoryUsages||[]).map(x=>[x.accessoryId,x]));appState.saleDraft.accessoryUsages=selected.map(a=>existing.get(a.id)||{accessoryId:a.id,name:a.name,sku:a.sku||'',unit:a.unit||'件',qty:1,unitCost:n(a.unitCost),stock:n(a.stock)});renderSaleNew();});};
+  $$('.remove-accessory-sale').forEach(btn=>btn.onclick=()=>{syncSaleFormToDraft();appState.saleDraft.accessoryUsages.splice(n(btn.closest('.accessory-sale-row').dataset.index),1);renderSaleNew();});
+  $$('.accessory-sale-qty').forEach(input=>input.onchange=()=>{syncSaleFormToDraft();renderSaleNew();});
+  ['saleDirectAccessoryCost','saleOtherDirectCost'].forEach(id=>{const el=$('#'+id);if(el)el.onchange=()=>{syncSaleFormToDraft();renderSaleNew();};});
   $('#viewSales').onclick=()=>{syncSaleFormToDraft();navigate('sales');};
   $('#saveSale').onclick=saveSale;
 }
@@ -951,6 +1035,7 @@ async function saveSale(){
   if(btn){btn.dataset.submitting='1';btn.disabled=true;btn.textContent='正在开单…';}
   try{
     await validateStock(d.items,-1);
+    await validateAccessoryUsages(d.accessoryUsages||[]);
     const totals=calcSaleTotals(d);d.__coreSaleId=d.__coreSaleId||uid('sale');d.__coreOrderNo=d.__coreOrderNo||await nextOrderNo();const id=d.__coreSaleId,orderNo=d.__coreOrderNo;const existingSale=await dbGet('sales',id);if(existingSale){appState.saleDraft=null;clearLocalDraft('mocui_sale_core_pending_v1');showToast(`销售单已存在：${existingSale.orderNo||orderNo}`);navigate('sales',{highlight:id});return;}saveLocalDraft('mocui_sale_core_pending_v1',{...d,items:(d.items||[]).map(i=>({...i,image:''})),__coreSaleId:id,__coreOrderNo:orderNo});
     const customerName=d.customerName||'散客';
     let customerId=d.customerId||'';
@@ -968,6 +1053,7 @@ async function saveSale(){
     for(const i of d.items){
       await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
     }
+    await applyAccessorySale(d.accessoryUsages||[],id,orderNo,createdAt);
     const sale={
       id,orderNo,customerId,customerName,
       items:d.items.map(i=>({...i,qty:n(i.qty),price:n(i.price),costPrice:n(i.costPrice)})),
@@ -977,7 +1063,9 @@ async function saveSale(){
       discountAmount:totals.discountAmount,
       finalAmount:totals.finalAmount,
       received:d.received===''?totals.finalAmount:n(d.received),
-      note:d.note,status:'active',coreVersion:1,businessDate,createdAt,cancelledAt:null,updatedAt:nowISO()
+      accessoryUsages:(d.accessoryUsages||[]).map(u=>({accessoryId:u.accessoryId,name:u.name,sku:u.sku||'',unit:u.unit||'件',qty:n(u.qty),unitCost:n(u.unitCost)})),
+      inventoryAccessoryCost:accessoryUsageCost(d.accessoryUsages||[]),directAccessoryCost:Math.max(0,n(d.directAccessoryCost)),accessoryCost:accessoryUsageCost(d.accessoryUsages||[])+Math.max(0,n(d.directAccessoryCost)),otherDirectCost:Math.max(0,n(d.otherDirectCost)),
+      note:d.note,status:'active',coreVersion:2,businessDate,createdAt,cancelledAt:null,updatedAt:nowISO()
     };
     await dbPut('sales',sale);
     await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale);
@@ -1011,7 +1099,7 @@ function saleCard(s){
 }
 function openSaleDetail(s){
   const linked=s.sourceType==='loan_sale'||s.items?.some(i=>i.fromLoan),loanId=s.sourceLoanId||s.items?.find(i=>i.loanId)?.loanId;
-  openModal(`销售单 ${s.orderNo}`,`<div class="grid-2"><div class="metric compact"><div class="label">客户</div><div class="value" style="font-size:14px">${esc(s.customerName||'散客')}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:14px">${s.status==='active'?'有效':'已撤销'}</div></div></div>${linked?`<div class="notice success">本单由借调商品售出自动生成，已联通调借、销售、库存流水和统计。<br>来源调借单：${esc(s.sourceLoanNo||'')}</div>`:(s.importedHistorical||s.sourceType==='qinsilk_history')?'<div class="notice warn">这是从秦丝导入的历史销售，只用于报表与查询，不改变当前库存，也不能在这里撤销。</div>':''}<div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>商品</th><th>颜色</th><th>数量</th><th>单价</th><th>小计</th><th>商品备注</th></tr></thead><tbody>${s.items.map(i=>`<tr><td>${esc(i.productName)}</td><td>${esc(i.color||'')}</td><td>${fmtInt(i.qty)}</td><td>${fmtMoney(i.price)}</td><td>${fmtMoney(n(i.qty)*n(i.price))}</td><td>${esc(i.itemNote||i.productNote||'')}</td></tr>`).join('')}</tbody></table></div><div class="total-box"><div class="total-row"><span>商品金额</span><strong>${fmtMoney(s.subtotal)}</strong></div><div class="total-row"><span>优惠/抹零</span><strong>-${fmtMoney(s.discountAmount)}</strong></div><div class="total-row"><span>本次实收</span><strong>${fmtMoney(s.received)}</strong></div><div class="total-row grand"><span>应收</span><strong>${fmtMoney(s.finalAmount)}</strong></div></div><div class="notice">开单时间：${fmtDateTime(s.createdAt)}<br>销售备注：${esc(s.note||'无')}</div>${linked&&loanId?`<button id="openLinkedLoan" class="btn secondary block">查看关联调借单</button>`:''}`,{onOpen:()=>{if($('#openLinkedLoan'))$('#openLinkedLoan').onclick=()=>openLoanDetail(loanId);}});
+  openModal(`销售单 ${s.orderNo}`,`<div class="grid-2"><div class="metric compact"><div class="label">客户</div><div class="value" style="font-size:14px">${esc(s.customerName||'散客')}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:14px">${s.status==='active'?'有效':'已撤销'}</div></div></div>${linked?`<div class="notice success">本单由借调商品售出自动生成，已联通调借、销售、库存流水和统计。<br>来源调借单：${esc(s.sourceLoanNo||'')}</div>`:(s.importedHistorical||s.sourceType==='qinsilk_history')?'<div class="notice warn">这是从秦丝导入的历史销售，只用于报表与查询，不改变当前库存，也不能在这里撤销。</div>':''}<div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>商品</th><th>颜色</th><th>数量</th><th>单价</th><th>小计</th><th>商品备注</th></tr></thead><tbody>${s.items.map(i=>`<tr><td>${esc(i.productName)}</td><td>${esc(i.color||'')}</td><td>${fmtInt(i.qty)}</td><td>${fmtMoney(i.price)}</td><td>${fmtMoney(n(i.qty)*n(i.price))}</td><td>${esc(i.itemNote||i.productNote||'')}</td></tr>`).join('')}</tbody></table></div><div class="total-box"><div class="total-row"><span>商品金额</span><strong>${fmtMoney(s.subtotal)}</strong></div><div class="total-row"><span>优惠/抹零</span><strong>-${fmtMoney(s.discountAmount)}</strong></div><div class="total-row"><span>本次实收</span><strong>${fmtMoney(s.received)}</strong></div><div class="total-row grand"><span>应收</span><strong>${fmtMoney(s.finalAmount)}</strong></div></div>${(n(s.accessoryCost)||n(s.otherDirectCost)||s.accessoryUsages?.length)?`<div class="notice success"><strong>成本明细</strong><br>商品成本 ${fmtMoney((s.items||[]).reduce((sum,i)=>sum+n(i.costPrice)*n(i.qty),0))} · 配饰成本 ${fmtMoney(s.accessoryCost)} · 其他直接成本 ${fmtMoney(s.otherDirectCost)}<br>${(s.accessoryUsages||[]).length?`库存配饰：${(s.accessoryUsages||[]).map(u=>`${esc(u.name)}×${fmtInt(u.qty)}`).join('、')}<br>`:''}实际毛利 <strong>${fmtMoney(saleGrossProfit(s))}</strong></div>`:''}<div class="notice">开单时间：${fmtDateTime(s.createdAt)}<br>销售备注：${esc(s.note||'无')}</div>${linked&&loanId?`<button id="openLinkedLoan" class="btn secondary block">查看关联调借单</button>`:''}`,{onOpen:()=>{if($('#openLinkedLoan'))$('#openLinkedLoan').onclick=()=>openLoanDetail(loanId);}});
 }
 async function cancelSale(id){
   const s=await dbGet('sales',id);if(!s||s.status!=='active')return;if(s.importedHistorical||s.sourceType==='qinsilk_history'){showToast('秦丝历史销售不参与库存，不能在这里撤销');return;}if(!await confirmDialog('确定撤销这张销售单？普通销售会恢复仓库库存；借调售出会恢复为借调未处理数量。'))return;
@@ -1026,6 +1114,7 @@ async function cancelSale(id){
         }
       }else await adjustStock(i.productId,n(i.qty),'sale_cancel','sale',s.id,`撤销销售单 ${s.orderNo}`);
     }
+    await cancelAccessorySale(s);
     s.status='cancelled';s.cancelledAt=nowISO();s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.cancel','sale',s.id,`${s.orderNo} 已撤销`,null,{status:s.status,cancelledAt:s.cancelledAt});showToast('销售单已撤销，相关库存和借调记录已同步');renderSales();
   }catch(err){showToast(err.message);}
 }
@@ -1039,6 +1128,7 @@ async function restoreSale(id){
         if(i.loanType==='borrow')await validateStock([i],-1);
       }else await validateStock([i],-1);
     }
+    await validateAccessoryUsages(s.accessoryUsages||[]);
     for(const i of s.items){
       if(i.fromLoan&&i.loanId){
         const l=await dbGet('loans',i.loanId);
@@ -1048,12 +1138,13 @@ async function restoreSale(id){
         else await recordStockReference(i.productId,'loan_sale_restore','sale',s.id,`恢复借调售出 ${s.orderNo}，借出时库存已扣减`);
       }else await adjustStock(i.productId,-n(i.qty),'sale_restore','sale',s.id,`恢复销售单 ${s.orderNo}`);
     }
+    await restoreAccessorySale(s);
     s.status='active';s.cancelledAt=null;s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.restore','sale',s.id,`${s.orderNo} 已恢复`,null,{status:s.status,updatedAt:s.updatedAt});showToast('销售单已恢复，借调、库存和统计已重新联通');renderSales();
   }catch(err){showToast(err.message);}
 }
 
 async function duplicateSale(id){
-  const s=await dbGet('sales',id);if(!s)return;const products=await dbAll('products');const pm=new Map(products.map(p=>[p.id,p]));appState.saleDraft={customerId:s.customerId||'',customerName:s.customerName||'',createdAt:localInputDateTime(),items:s.items.filter(i=>pm.has(i.productId)).map(i=>{const {fromLoan,loanId,loanNo,loanPerson,loanType,loanSaleEventId,...rest}=i;return {...rest,stock:n(pm.get(i.productId).stock),itemNote:i.itemNote||''};}),discountType:s.discountType,discountValue:s.discountValue,received:'',note:`复制自撤销单 ${s.orderNo}`};navigate('sale-new');
+  const s=await dbGet('sales',id);if(!s)return;const products=await dbAll('products');const pm=new Map(products.map(p=>[p.id,p]));appState.saleDraft={customerId:s.customerId||'',customerName:s.customerName||'',createdAt:localInputDateTime(),items:s.items.filter(i=>pm.has(i.productId)).map(i=>{const {fromLoan,loanId,loanNo,loanPerson,loanType,loanSaleEventId,...rest}=i;return {...rest,stock:n(pm.get(i.productId).stock),itemNote:i.itemNote||''};}),accessoryUsages:[],directAccessoryCost:n(s.directAccessoryCost),otherDirectCost:n(s.otherDirectCost),discountType:s.discountType,discountValue:s.discountValue,received:'',note:`复制自撤销单 ${s.orderNo}；库存配饰请重新选择`};navigate('sale-new');
 }
 
 function loanListItem(l){
@@ -1235,7 +1326,7 @@ function saleItemNetAmount(sale,item){
   if(subtotal>0&&Number.isFinite(finalAmount))return gross*(finalAmount/subtotal);
   return gross;
 }
-function saleCostTotal(sale){return (sale?.items||[]).reduce((sum,i)=>sum+n(i.costPrice)*n(i.qty),0);}
+function saleCostTotal(sale){return (sale?.items||[]).reduce((sum,i)=>sum+n(i.costPrice)*n(i.qty),0)+n(sale?.accessoryCost)+n(sale?.otherDirectCost);}
 function saleGrossProfit(sale){return n(sale?.finalAmount)-saleCostTotal(sale);}
 function saleIsHistorical(sale){return Boolean(sale?.importedHistorical||sale?.sourceType==='qinsilk_history'||sale?.source==='qinsilk'&&String(sale?.sourceKey||'').startsWith('qinsilk:'));}
 function saleIsReportActive(sale){return sale?.status==='active'&&!sale?.excludedFromReports;}
@@ -1998,10 +2089,10 @@ async function renderSettings(){
   $('#main').innerHTML=`${cloudEnabled?'':`<div class="notice warn"><strong>当前未连接云端</strong><br>请检查网络后刷新页面。不要清理浏览器网站数据，并先导出 JSON 备份。</div>`}
   ${cloudEnabled?`<div class="card"><div class="card-title">Cloudflare 云端</div><div class="grid-3"><div class="metric compact"><div class="label">同步版本</div><div class="value">${fmtInt(CloudSync.revision||0)}</div></div><div class="metric compact"><div class="label">设备</div><div class="value" style="font-size:12px">${esc(String(CloudSync.deviceId||'').slice(0,8))}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:13px">${CloudSync.mode==='cloud'?'正常':'待处理'}</div></div></div><div class="btn-row" style="margin-top:10px"><button id="syncNow" class="btn secondary">立即同步</button><button id="cloudBackups" class="btn secondary">云端备份</button><button id="manageDevices" class="btn secondary">登录设备</button><button id="changeCloudPassword" class="btn secondary">修改密码</button></div><button id="forceCloudUpload" class="btn warn block" style="margin-top:8px">本机数据强制覆盖云端</button><button id="logoutCloud" class="btn ghost block" style="margin-top:8px">退出登录</button></div>`:''}
   <div class="card"><div class="card-title">合同抬头</div><div class="notice">用于自动生成借调协议和调拨交接单；内容会跟随业务数据同步到云端。请填写真实签约主体。</div><form id="legalProfileForm"><div class="form-group"><label class="form-label">甲方真实姓名/公司名称</label><input id="setPartyAName" class="input" value="${esc(profile.partyAName)}"></div><div class="form-group"><label class="form-label">身份证号/统一社会信用代码</label><input id="setPartyAIdNo" class="input" value="${esc(profile.partyAIdNo)}"></div><div class="form-row"><div class="form-group"><label class="form-label">联系电话</label><input id="setPartyAPhone" class="input" value="${esc(profile.partyAPhone)}"></div><div class="form-group"><label class="form-label">交接地点</label><input id="setDeliveryPlace" class="input" value="${esc(profile.defaultDeliveryPlace)}"></div></div><div class="form-group"><label class="form-label">住所/经营地址</label><input id="setPartyAAddress" class="input" value="${esc(profile.partyAAddress)}"></div><div class="form-group"><label class="form-label">默认争议管辖</label><input id="setDisputeCourt" class="input" value="${esc(profile.defaultDisputeCourt)}"></div><button class="btn secondary block" type="submit">保存合同抬头</button></form></div>
-  <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
+  <div class="card"><div class="card-title">备份与数据安全</div><div class="notice warn">每次云端同步都会生成历史版本；仍建议每周把完整 JSON 保存到 iCloud。最近本地导出：${lastExport?fmtDateTime(lastExport):'尚未导出'}</div><button id="openAccessories" class="btn block secondary" style="margin-bottom:8px">配饰库存</button><div class="grid-2"><button id="inventoryHealth" class="btn secondary">库存体检</button><button id="openAuditLogs" class="btn secondary">操作日志</button></div><button id="backupAll" class="btn block" style="margin-top:8px">导出完整 JSON 备份</button><label class="btn secondary block" style="display:block;text-align:center;margin-top:8px" for="restoreFile">从 JSON 备份恢复</label><input id="restoreFile" class="hidden" type="file" accept=".json,application/json"></div>
   <div class="card"><div class="card-title">当前数据量</div><div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${counts.products}</div></div><div class="metric compact"><div class="label">销售单</div><div class="value">${counts.sales}</div></div><div class="metric compact"><div class="label">调借单</div><div class="value">${counts.loans}</div></div></div></div>
   <div class="card"><div class="card-title danger-text">危险操作</div><button id="clearAll" class="btn danger block">清空全部业务数据</button></div>
-  <div class="notice">版本：v3.11.0 · 过手差价正式版 + 调货货源库安全试用 + 操作动线优化 · 核心交易层保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
+  <div class="notice">版本：v3.12.0 · 配饰库存正式版 · 过手差价正式版 + 调货货源库安全试用 + 操作动线优化 · 核心交易层保持冻结<br>手机和电脑共用 Cloudflare D1 + R2；本机 IndexedDB 用于加速和离线缓存。</div>`;
   $('#legalProfileForm').onsubmit=async e=>{e.preventDefault();await dbPut('settings',{id:'legalProfile',partyAName:$('#setPartyAName').value.trim(),partyAIdNo:$('#setPartyAIdNo').value.trim(),partyAPhone:$('#setPartyAPhone').value.trim(),partyAAddress:$('#setPartyAAddress').value.trim(),defaultDeliveryPlace:$('#setDeliveryPlace').value.trim(),defaultDisputeCourt:$('#setDisputeCourt').value.trim(),updatedAt:nowISO()});showToast('合同抬头已保存并等待同步');};
   $('#backupAll').onclick=backupAll;$('#restoreFile').onchange=restoreAll;$('#clearAll').onclick=clearAllData;
   if($('#syncNow'))$('#syncNow').onclick=async()=>{try{await CloudSync.push();showToast('云端同步完成');renderSettings();}catch(err){showToast(err.message);}};
@@ -2010,6 +2101,7 @@ async function renderSettings(){
   if($('#changeCloudPassword'))$('#changeCloudPassword').onclick=openCloudPasswordForm;
   if($('#forceCloudUpload'))$('#forceCloudUpload').onclick=async()=>{if(!await confirmDialog('只有确认云端数据不需要保留时才能继续。确定用本机数据覆盖云端？'))return;if(!await confirmDialog('再次确认：覆盖后，其他设备的云端新数据会被本机版本替代。'))return;try{await CloudSync.forcePush();showToast('本机数据已覆盖云端');renderSettings();}catch(err){showToast(err.message);}};
   if($('#logoutCloud'))$('#logoutCloud').onclick=()=>CloudSync.logout();
+  if($('#openAccessories'))$('#openAccessories').onclick=()=>navigate('accessories');
   if($('#inventoryHealth'))$('#inventoryHealth').onclick=()=>navigate('health');if($('#openAuditLogs'))$('#openAuditLogs').onclick=()=>navigate('audit');
 }
 
