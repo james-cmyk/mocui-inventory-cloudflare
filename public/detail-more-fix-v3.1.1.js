@@ -1,67 +1,34 @@
 'use strict';
 (() => {
-  const VERSION='3.1.6';
+  const VERSION='3.1.7';
 
-  function fixProductRelations(){
-    if(window.appState?.route!=='product-detail') return;
-    const main=document.querySelector('#main');
-    if(!main) return;
-    const sections=[...main.querySelectorAll('.mocui-product-relations')];
-    if(sections.length<=1) return;
-    sections.slice(1).forEach(el=>el.remove());
-  }
+  // 直接替换 app.js 已定义的 renderMore。
+  // 不读取、不写入 IndexedDB；不修改商品、销售、调借、库存或同步逻辑。
+  window.renderMore = async function renderMoreV317(){
+    setHeader('更多','常用工具');
+    const items=[
+      ['customers','客','客户'],
+      ['sales','单','销售单'],
+      ['stocktake','盘','盘点'],
+      ['ledger','流','流水'],
+      ['trade-gallery','货','货源'],
+      ['settings','设','设置']
+    ];
 
-  function compactMore(){
-    if(window.appState?.route!=='more') return;
-    const main=document.querySelector('#main');
-    if(!main) return;
-
-    // 只有旧“更多”长列表真正出现后才替换，避免和 renderMore 抢执行顺序。
-    if(!main.querySelector('.more-group')) return;
-
-    if(typeof setHeader==='function') setHeader('更多','常用工具');
-    main.innerHTML=`
-      <section class="mocui-more-v316">
-        <div class="mocui-more-v316-grid">
-          <button type="button" data-route="customers"><span>客</span><b>客户</b></button>
-          <button type="button" data-route="sales"><span>单</span><b>销售单</b></button>
-          <button type="button" data-route="stocktake"><span>盘</span><b>盘点</b></button>
-          <button type="button" data-route="ledger"><span>流</span><b>流水</b></button>
-          <button type="button" data-route="trade-gallery"><span>货</span><b>货源</b></button>
-          <button type="button" data-route="settings"><span>设</span><b>设置</b></button>
+    $('#main').innerHTML=`
+      <section class="more-core-v317">
+        <div class="more-core-v317-grid">
+          ${items.map(([route,icon,label])=>`
+            <button type="button" class="more-core-v317-item" data-more-route="${route}">
+              <span>${icon}</span><b>${label}</b>
+            </button>`).join('')}
         </div>
       </section>`;
-    main.querySelectorAll('[data-route]').forEach(el=>{
-      el.onclick=()=>navigate(el.dataset.route);
+
+    $$('.more-core-v317-item').forEach(el=>{
+      el.onclick=()=>navigate(el.dataset.moreRoute);
     });
-  }
+  };
 
-  function apply(){
-    fixProductRelations();
-    compactMore();
-  }
-
-  function start(){
-    const main=document.querySelector('#main');
-    if(!main) return;
-
-    // 关键修复：观察“原页面完成渲染”这个事实，而不是猜 80/180/700ms。
-    // 替换成长列表后 observer 会再触发一次，但此时没有 .more-group，因此不会循环。
-    const observer=new MutationObserver(()=>requestAnimationFrame(apply));
-    observer.observe(main,{childList:true,subtree:false});
-    apply();
-
-    window.addEventListener('pageshow',apply,{passive:true});
-    document.addEventListener('visibilitychange',()=>{
-      if(!document.hidden) requestAnimationFrame(apply);
-    },{passive:true});
-  }
-
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',start,{once:true});
-  }else{
-    start();
-  }
-
-  window.MocuiV316={version:VERSION,apply};
+  window.MocuiMoreV317={version:VERSION};
 })();

@@ -1,19 +1,15 @@
-/* v3.1.6 更多：固定一屏 3×2 */
-.mocui-more-v316{padding:6px 0 12px}
-.mocui-more-v316-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.mocui-more-v316-grid button{
+/* v3.1.7 更多页：固定一屏 3×2 */
+.more-core-v317{padding:6px 0 12px}
+.more-core-v317-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.more-core-v317-item{
   appearance:none;border:1px solid #e4e7ec;background:#fff;border-radius:18px;
-  height:112px;padding:10px 6px;color:#101828;font:inherit;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
-  box-shadow:0 1px 2px rgba(16,24,40,.02)
+  height:108px;padding:10px 6px;color:#101828;font:inherit;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px
 }
-.mocui-more-v316-grid button span{
+.more-core-v317-item span{
   width:40px;height:40px;border-radius:13px;background:#f2f4f7;
   display:grid;place-items:center;color:#475467;font-size:14px
 }
-.mocui-more-v316-grid button b{font-size:16px;font-weight:800}
-.mocui-more-v316-grid button:active{transform:scale(.98);background:#f8fafc}
-@media(max-height:700px){
-  .mocui-more-v316{padding-top:0}
-  .mocui-more-v316-grid button{height:94px}
-}
+.more-core-v317-item b{font-size:16px;font-weight:800}
+.more-core-v317-item:active{transform:scale(.98);background:#f8fafc}
+@media(max-height:700px){.more-core-v317-item{height:92px}}
