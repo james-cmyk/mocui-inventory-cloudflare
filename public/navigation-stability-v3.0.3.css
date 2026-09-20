@@ -1,0 +1,8 @@
+/* v3.0.3 导航与 UI 稳定性 */
+.main.route-changing{opacity:1!important;transform:none!important}
+html.mocui-nav-busy .bottom-nav .nav-item{pointer-events:none}
+.mocui-route-loading{padding:14px 2px 24px;animation:none!important}
+.mocui-route-loading-title{font-size:20px;font-weight:800;color:#101828;margin:2px 0 18px}
+.mocui-route-loading-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mocui-route-loading-grid i,.mocui-route-loading-row{display:block;background:#fff;border:1px solid #e7e9ee;border-radius:16px;min-height:84px}
+.mocui-route-loading-row{margin-top:12px;min-height:64px}.mocui-route-loading-row.short{min-height:48px;width:72%}

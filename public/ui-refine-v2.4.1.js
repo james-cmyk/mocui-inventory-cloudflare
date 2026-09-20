@@ -302,32 +302,25 @@
   }
 
   function install() {
-    run();
-
-    const main = document.querySelector('#main');
-    const modal = document.querySelector('#modalRoot');
-
-    let raf = 0;
-    const observe = () => {
-      if (main) observer.observe(main, {childList:true, subtree:true});
-      if (modal) observer.observe(modal, {childList:true, subtree:true});
-    };
+    // v3.0.3: 不再用 MutationObserver 反复整理主页面。
+    // reports/products/loans 的 refine 会移动节点；持续监听会让按钮在 iOS 上来回跳动。
     const safeRun = () => {
-      raf = 0;
-      // run() 本身会改文字/节点。执行时先暂停观察，
-      // 避免自己的 DOM 修改再次触发 MutationObserver，形成无限重绘。
-      observer.disconnect();
-      try { run(); }
-      finally { observe(); }
+      try { run(); } catch (error) { console.error('[mocui ui refine]', error); }
     };
-    const observer = new MutationObserver(() => {
-      if (raf) return;
-      raf = requestAnimationFrame(safeRun);
-    });
-    observe();
+
+    safeRun();
+
+    // 弹窗属于按需 UI，只在用户操作后做一次整理，不做持续 DOM 监听。
+    let clickTimer = 0;
+    document.addEventListener('click', () => {
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => {
+        if (document.querySelector('#modalRoot .modal-backdrop')) safeRun();
+      }, 80);
+    }, {passive:true});
 
     window.MocuiUIRefine = {
-      version: '2.4.1',
+      version: '2.4.2',
       run: safeRun
     };
   }
