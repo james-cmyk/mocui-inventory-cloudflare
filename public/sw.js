@@ -1,5 +1,5 @@
-const CACHE='mocui-v3.13-r2-thumbnails';
-const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.14-large-data-lists';
+const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -49,3 +49,5 @@ self.addEventListener('fetch',event=>{
 // v3.12.0：新增高价值配饰独立库存；销售自动扣减/撤销退回/恢复重扣；低价值配饰与其他直接成本并入核心毛利；不升级 IndexedDB schema，不迁移旧数据
 
 // v3.13.0：R2 320px 商品缩略图；原图永久保留，失败自动回退原图。
+
+// v3.14.0：销售/调借/库存流水/客户使用可重建轻量索引 + Cursor 分页；业务数据库 schema 不变。
