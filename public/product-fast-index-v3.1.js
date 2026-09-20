@@ -1,7 +1,7 @@
 'use strict';
 (() => {
-  const VERSION='3.1.0';
-  const PERF_DB='mocui_perf_v31';
+  const VERSION='3.13.0';
+  const PERF_DB='mocui_perf_v313';
   const PERF_VERSION=1;
   const PAGE_SIZE=30;
   let perfDbPromise=null;
@@ -50,7 +50,9 @@
       stock:Number(p.stock||0),historicalOnly:Boolean(p.historicalOnly),
       updatedAt:p.updatedAt||p.createdAt||'',
       // Base64 原图绝不复制进快速索引；R2/网络地址才保留。
-      image:image.startsWith('data:')?'':image
+      image:image.startsWith('data:')?'':image,
+      // v3.13：列表优先读取 320px R2 缩略图；没有时回退原图。
+      thumbnail:String(p?.thumbnail||'')
     };
   }
   async function indexPut(p){
