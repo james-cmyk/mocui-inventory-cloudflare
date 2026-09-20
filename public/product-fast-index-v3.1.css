@@ -1,0 +1,6 @@
+/* v3.1 商品快速索引与分页 */
+.mocui-index-loading{padding:22px 14px;text-align:center;color:#667085;font-size:12px;line-height:1.7}
+.mocui-index-loading strong{display:block;color:#344054;font-size:14px;margin-bottom:2px}
+.mocui-load-more{margin:12px 0 4px}
+.mocui-fast-products .list{content-visibility:auto}
+.mocui-fast-products .list-item{contain:layout paint style}
