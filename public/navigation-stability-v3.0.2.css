@@ -1,0 +1,10 @@
+
+/* v3.0.2：切页期间保留当前页面清晰显示，避免 iOS 上出现“整页虚化像死机”。 */
+.main.route-changing{
+  opacity:1 !important;
+  transform:none !important;
+}
+/* 导航执行中仍允许页面阅读，但底部导航不重复触发并发渲染。 */
+html.mocui-nav-busy .bottom-nav .nav-item{
+  pointer-events:none;
+}
