@@ -1,9 +1,9 @@
-const CACHE='mocui-v2.3-product-flow';
+const CACHE='mocui-v2.4-ui-refine';
 const CORE=[
   './','./index.html','./offline.html',
-  './app.css','./ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./business-flow-v2.3.css?v=2.3.0',
+  './app.css','./ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./business-flow-v2.3.css?v=2.3.0','./ui-refine-v2.4.css?v=2.4.0',
   './cloud.js','./sync-v2.js?v=2.1.0','./qinsilk-import.js','./content-workbench.js',
-  './share.css','./share.js','./app.js','./trade-gallery-queue.js?v=1.6.0','./business-ux-v2.js?v=2.2.0','./business-flow-v2.3.js?v=2.3.0','./ui-icons.js?v=1.4.0',
+  './share.css','./share.js','./app.js','./trade-gallery-queue.js?v=1.6.0','./business-ux-v2.js?v=2.2.0','./business-flow-v2.3.js?v=2.3.0','./ui-refine-v2.4.js?v=2.4.0','./ui-icons.js?v=1.4.0',
   './ui-shell-guard.js','./pwa.js?v=2.2.0','./manifest.webmanifest',
   './icon-180.png','./icon-192.png','./icon-512.png'
 ];
@@ -14,4 +14,4 @@ async function updateCache(request,cacheKey=request){try{const response=await fe
 async function appShell(request,event){const cached=(await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'));if(cached){event.waitUntil(updateCache(request,'./index.html'));return cached;}return(await updateCache(request,'./index.html'))||(await caches.match('./offline.html'))||Response.error();}
 async function staleWhileRevalidate(request,event){const cached=await caches.match(request);const network=updateCache(request);if(cached){event.waitUntil(network);return cached;}return(await network)||Response.error();}
 self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;if(event.request.mode==='navigate'&&url.pathname==='/share.html'){event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match('./share.html')||Response.error()));return;}if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return;}if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));});
-// v2.3：商品子分类强制 + 商品销售/调借关联 + 首页精简。
+// v2.4：全局适度精简；保留业务信息与安全提示。

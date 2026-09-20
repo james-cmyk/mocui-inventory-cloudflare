@@ -1,0 +1,315 @@
+/* 漠翠进销存 v2.4：全局适度精简，不删业务信息 */
+:root{
+  --mocui-gap-xs:6px;
+  --mocui-gap-sm:9px;
+  --mocui-gap-md:12px;
+  --mocui-radius:14px;
+}
+
+/* 页面总体密度 */
+body:not([data-mocui-route="dashboard"]) #main{
+  padding-top:10px;
+}
+body:not([data-mocui-route="dashboard"]) #main > .card,
+body:not([data-mocui-route="dashboard"]) #main > .notice,
+body:not([data-mocui-route="dashboard"]) #main > .grid-2,
+body:not([data-mocui-route="dashboard"]) #main > .grid-3,
+body:not([data-mocui-route="dashboard"]) #main > .segment,
+body:not([data-mocui-route="dashboard"]) #main > .toolbar{
+  margin-bottom:10px;
+}
+body:not([data-mocui-route="dashboard"]) .section-title{
+  margin-top:18px;
+  margin-bottom:8px;
+}
+
+/* 顶部副标题弱化，主标题仍保留 */
+.topbar .subtitle{
+  font-size:11px;
+  line-height:1.3;
+  color:#98a2b3;
+}
+
+/* 统计卡片更紧凑，但不删除数据 */
+.mocui-summary-strip{
+  gap:8px!important;
+}
+.mocui-summary-strip .metric{
+  min-height:auto!important;
+  padding:11px 10px!important;
+  border-radius:13px!important;
+}
+.mocui-summary-strip .label{
+  font-size:11px!important;
+}
+.mocui-summary-strip .value{
+  margin-top:4px!important;
+  font-size:18px!important;
+}
+
+/* 搜索与筛选 */
+.mocui-filter-bar,
+.toolbar{
+  gap:8px!important;
+}
+.filter-select,
+.category-filter-btn{
+  min-height:40px!important;
+}
+.search input{
+  min-height:40px!important;
+}
+
+/* 通用状态标签：允许横滑，避免手机上挤成两三行 */
+.mocui-compact-segment,
+.mocui-scroll-tabs,
+.mocui-report-tabs{
+  display:flex!important;
+  gap:5px!important;
+  overflow-x:auto!important;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+  padding-bottom:2px;
+}
+.mocui-compact-segment::-webkit-scrollbar,
+.mocui-scroll-tabs::-webkit-scrollbar,
+.mocui-report-tabs::-webkit-scrollbar{
+  display:none;
+}
+.mocui-compact-segment button,
+.mocui-scroll-tabs button,
+.mocui-report-tabs button{
+  flex:0 0 auto!important;
+  min-width:auto!important;
+  padding:8px 11px!important;
+  border-radius:10px!important;
+  font-size:12px!important;
+}
+
+/* 列表记录：保留关键信息但减少空白 */
+.mocui-compact-record{
+  padding:11px 12px!important;
+  border-radius:13px!important;
+}
+.mocui-compact-record .item-title{
+  font-size:14px!important;
+  line-height:1.35!important;
+}
+.mocui-compact-record .item-meta{
+  margin-top:3px!important;
+  font-size:11px!important;
+  line-height:1.45!important;
+}
+.mocui-compact-record .badge{
+  font-size:10px!important;
+  padding:4px 7px!important;
+}
+
+/* 页面说明缩短后的样式 */
+.mocui-page-tip{
+  padding:10px 12px!important;
+  border-radius:12px!important;
+  font-size:11px!important;
+  line-height:1.55!important;
+}
+.mocui-small-entry{
+  width:auto!important;
+  min-width:84px;
+  padding:9px 13px!important;
+  margin-bottom:10px!important;
+  border-radius:11px!important;
+  font-size:12px!important;
+}
+
+/* 商品页工具 */
+body[data-mocui-route="products"] #main > .btn-row{
+  display:flex;
+  gap:7px;
+  margin-bottom:9px!important;
+}
+body[data-mocui-route="products"] #main > .btn-row .btn{
+  flex:0 0 auto;
+  min-width:62px;
+  padding:8px 12px!important;
+  font-size:12px!important;
+}
+body[data-mocui-route="products"] #productList .list-item{
+  padding:10px!important;
+}
+
+/* 调借页：过期仍然显眼，只减少普通文字拥挤 */
+body[data-mocui-route="loans"] .list-item.overdue{
+  border-color:#fecdca!important;
+  background:#fff7f6!important;
+}
+body[data-mocui-route="loans"] .list-item.overdue .badge.danger{
+  font-weight:800;
+}
+
+/* 报表：控制区更轻，报表内容本身不删 */
+body[data-mocui-route="reports"] #reportBody{
+  margin-top:10px;
+}
+body[data-mocui-route="reports"] .report-mode-tabs{
+  margin-bottom:7px!important;
+}
+body[data-mocui-route="reports"] .metric{
+  border-radius:13px!important;
+}
+body[data-mocui-route="reports"] .assistant-hero{
+  padding:14px!important;
+}
+body[data-mocui-route="reports"] .assistant-hero h3{
+  font-size:18px!important;
+}
+body[data-mocui-route="reports"] .assistant-hero p{
+  font-size:11px!important;
+  line-height:1.5!important;
+}
+
+/* 更多：仍然分组，但每项不再像大段说明 */
+body[data-mocui-route="more"] .more-group{
+  margin-bottom:14px!important;
+}
+body[data-mocui-route="more"] .more-group-title{
+  margin:0 2px 7px!important;
+  font-size:11px!important;
+}
+body[data-mocui-route="more"] .mocui-more-tile{
+  padding:10px 11px!important;
+  min-height:58px;
+}
+body[data-mocui-route="more"] .mocui-more-tile .thumb{
+  width:34px!important;
+  height:34px!important;
+  min-width:34px!important;
+  border-radius:10px!important;
+  font-size:14px!important;
+}
+body[data-mocui-route="more"] .mocui-more-tile .item-title{
+  font-size:13px!important;
+}
+body[data-mocui-route="more"] .mocui-more-tile .item-meta{
+  margin-top:2px!important;
+  font-size:10px!important;
+}
+.mocui-maintenance-note{
+  padding:10px 12px!important;
+  font-size:11px!important;
+}
+
+/* 客户 / 销售 / 过手 / 外部货 */
+body[data-mocui-route="customers"] .list-item,
+body[data-mocui-route="sales"] .card,
+body[data-mocui-route="pass-deals"] .card,
+body[data-mocui-route="external-goods"] .card{
+  margin-bottom:8px!important;
+}
+
+/* 库存流水 / 日志 */
+.mocui-compact-timeline .timeline-item{
+  padding:10px 0!important;
+}
+.mocui-compact-timeline .time{
+  font-size:10px!important;
+}
+.mocui-compact-timeline .text{
+  margin-top:2px!important;
+  font-size:12px!important;
+}
+.mocui-compact-timeline .item-meta{
+  margin-top:2px!important;
+  font-size:10px!important;
+}
+
+/* 设置：内容不能删，主要做分区压缩 */
+.mocui-settings-card{
+  padding:14px!important;
+  border-radius:14px!important;
+  margin-bottom:10px!important;
+}
+.mocui-settings-card .card-title{
+  margin-bottom:9px!important;
+  font-size:14px!important;
+}
+.mocui-settings-note{
+  padding:9px 10px!important;
+  font-size:10.5px!important;
+  line-height:1.55!important;
+}
+body[data-mocui-route="settings"] .btn-row{
+  gap:7px!important;
+}
+body[data-mocui-route="settings"] .btn{
+  min-height:40px;
+}
+
+/* 表单与弹窗：减少上下滚动，但保留字段说明和安全提示 */
+#modalRoot .modal-body{
+  padding-top:12px!important;
+}
+#modalRoot .mocui-form-group{
+  margin-bottom:12px!important;
+}
+#modalRoot .form-label{
+  margin-bottom:5px!important;
+  font-size:12px!important;
+}
+#modalRoot .input,
+#modalRoot .select,
+#modalRoot .textarea{
+  border-radius:11px!important;
+}
+#modalRoot .input,
+#modalRoot .select{
+  min-height:42px!important;
+}
+#modalRoot .textarea{
+  min-height:86px!important;
+}
+#modalRoot .mocui-field-help{
+  margin-top:4px!important;
+  font-size:10px!important;
+  line-height:1.45!important;
+}
+#modalRoot .mocui-modal-note{
+  padding:9px 10px!important;
+  font-size:10.5px!important;
+  line-height:1.5!important;
+}
+
+/* 调借表单仍保留三步逻辑，只把卡片压紧 */
+#modalRoot .loan-step-card{
+  padding:12px!important;
+  margin-bottom:10px!important;
+  border-radius:13px!important;
+}
+#modalRoot .loan-step-title{
+  margin-bottom:10px!important;
+  font-size:13px!important;
+}
+#modalRoot .loan-product-card{
+  padding:10px!important;
+}
+
+/* 货源图库保持图片为主 */
+.mocui-gallery-grid{
+  gap:8px!important;
+}
+
+/* 小屏幕：不过度压缩，保证可点 */
+@media(max-width:420px){
+  body:not([data-mocui-route="dashboard"]) #main{
+    padding-left:12px;
+    padding-right:12px;
+  }
+  .mocui-summary-strip{
+    gap:7px!important;
+  }
+  .mocui-summary-strip .metric{
+    padding:9px 8px!important;
+  }
+  .mocui-summary-strip .value{
+    font-size:16px!important;
+  }
+}
