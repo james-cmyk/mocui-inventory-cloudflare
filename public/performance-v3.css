@@ -1,0 +1,11 @@
+/* v3.0 性能与销售成本 */
+.mocui-sale-cost-card{margin:10px 0;padding:12px;border:1px solid #e4e7ec;border-radius:14px;background:#f9fafb}
+.mocui-sale-cost-title{font-size:12px;font-weight:800;color:#344054;margin-bottom:9px}
+.mocui-profit-preview{margin-top:4px;padding:9px 10px;border-radius:10px;background:#fff;font-size:11px;color:#667085;line-height:1.7}
+.mocui-profit-preview strong{color:#101828;font-size:13px}
+.mocui-sale-cost-detail{margin-top:10px;padding:10px 12px;border:1px solid #e4e7ec;border-radius:12px;background:#f9fafb}
+.mocui-sale-cost-detail>div{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:11px;color:#667085}
+.mocui-sale-cost-detail .profit{margin-top:4px;padding-top:8px;border-top:1px solid #e4e7ec;color:#101828}
+.mocui-sale-cost-detail .profit strong{font-size:15px}
+html.mocui-background *{animation-play-state:paused!important}
+img[loading="lazy"]{content-visibility:auto}

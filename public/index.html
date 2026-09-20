@@ -13,14 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png" />
   <style id="bootCritical">
-    html,body{background:#f5f6f8}
-    .boot-screen{position:fixed;z-index:9998;inset:0;padding:calc(22px + env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom));background:#f5f6f8;color:#101828;opacity:1;transition:opacity .2s ease;overflow:hidden}
-    .boot-screen.is-ready{opacity:0;pointer-events:none}
-    .boot-shell{max-width:620px;margin:0 auto}.boot-brand{font-size:22px;font-weight:850}.boot-status{font-size:12px;color:#667085;margin-top:4px;min-height:18px}
-    .boot-metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:22px}.boot-card{height:88px;border:1px solid #e4e7ec;border-radius:16px;background:#fff;padding:14px}
-    .boot-line{height:11px;border-radius:999px;background:#eef1f4}.boot-line.short{width:46%}.boot-line.value{height:22px;width:66%;margin-top:13px}
-    .boot-list{margin-top:14px}.boot-row{height:74px;border:1px solid #e4e7ec;border-radius:15px;background:#fff;margin-top:9px;padding:14px}
-    .boot-retry{display:none;margin-top:18px;border:0;border-radius:12px;padding:12px 16px;background:#101828;color:#fff;font-weight:750}.boot-screen.has-error .boot-retry{display:inline-block}
+    html,body{background:#f5f6f8}.boot-screen{position:fixed;z-index:9998;inset:0;padding:calc(22px + env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom));background:#f5f6f8;color:#101828;opacity:1;transition:opacity .2s ease;overflow:hidden}.boot-screen.is-ready{opacity:0;pointer-events:none}.boot-shell{max-width:620px;margin:0 auto}.boot-brand{font-size:22px;font-weight:850}.boot-status{font-size:12px;color:#667085;margin-top:4px;min-height:18px}.boot-metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:22px}.boot-card{height:88px;border:1px solid #e4e7ec;border-radius:16px;background:#fff;padding:14px}.boot-line{height:11px;border-radius:999px;background:#eef1f4}.boot-line.short{width:46%}.boot-line.value{height:22px;width:66%;margin-top:13px}.boot-list{margin-top:14px}.boot-row{height:74px;border:1px solid #e4e7ec;border-radius:15px;background:#fff;margin-top:9px;padding:14px}.boot-retry{display:none;margin-top:18px;border:0;border-radius:12px;padding:12px 16px;background:#101828;color:#fff;font-weight:750}.boot-screen.has-error .boot-retry{display:inline-block}
   </style>
   <link rel="stylesheet" href="app.css" />
   <link rel="stylesheet" href="ui-icons.css?v=1.4.0" />
@@ -28,57 +21,28 @@
   <link rel="stylesheet" href="business-ux-v2.css?v=2.2.0" />
   <link rel="stylesheet" href="business-flow-v2.3.css?v=2.3.0" />
   <link rel="stylesheet" href="ui-refine-v2.4.css?v=2.4.0" />
+  <link rel="stylesheet" href="performance-v3.css?v=3.0.0" />
 </head>
 <body>
-  <div id="bootScreen" class="boot-screen" role="status" aria-live="polite">
-    <div class="boot-shell">
-      <div class="boot-brand">漠翠进销存</div>
-      <div id="bootStatus" class="boot-status">正在安全启动…</div>
-      <div class="boot-metrics">
-        <div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div>
-        <div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div>
-        <div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div>
-        <div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div>
-      </div>
-      <div class="boot-list">
-        <div class="boot-row"><div class="boot-line"></div><div class="boot-line"></div></div>
-        <div class="boot-row"><div class="boot-line"></div><div class="boot-line"></div></div>
-      </div>
-      <button id="bootRetry" class="boot-retry" type="button">重新连接</button>
-    </div>
-  </div>
+  <div id="bootScreen" class="boot-screen" role="status" aria-live="polite"><div class="boot-shell"><div class="boot-brand">漠翠进销存</div><div id="bootStatus" class="boot-status">正在安全启动…</div><div class="boot-metrics"><div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div><div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div><div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div><div class="boot-card"><div class="boot-line short"></div><div class="boot-line value"></div></div></div><div class="boot-list"><div class="boot-row"><div class="boot-line"></div><div class="boot-line"></div></div><div class="boot-row"><div class="boot-line"></div><div class="boot-line"></div></div></div><button id="bootRetry" class="boot-retry" type="button">重新连接</button></div></div>
   <div id="app">
-    <header class="topbar">
-      <div class="top-title-group">
-        <button id="pageBack" class="page-back hidden ui-icon-only" type="button" aria-label="返回上一页"><img src="/assets/icons/common/ic_common_back.png" alt="" /></button>
-        <div><div class="brand">漠翠进销存</div><div id="pageSubtitle" class="subtitle">本机优先 · 增量同步</div></div>
-      </div>
-      <div class="top-actions">
-        <span id="cloudBadge" class="cloud-badge checking">连接中</span>
-        <button id="topAction" class="icon-btn hidden ui-icon-only" type="button" aria-label="页面操作"><img src="/assets/icons/common/ic_common_plus.png" alt="" /></button>
-      </div>
-    </header>
+    <header class="topbar"><div class="top-title-group"><button id="pageBack" class="page-back hidden ui-icon-only" type="button" aria-label="返回上一页"><img src="/assets/icons/common/ic_common_back.png" alt="" /></button><div><div class="brand">漠翠进销存</div><div id="pageSubtitle" class="subtitle">本机优先 · 增量同步</div></div></div><div class="top-actions"><span id="cloudBadge" class="cloud-badge checking">连接中</span><button id="topAction" class="icon-btn hidden ui-icon-only" type="button" aria-label="页面操作"><img src="/assets/icons/common/ic_common_plus.png" alt="" /></button></div></header>
     <main id="main" class="main"></main>
-    <nav class="bottom-nav" aria-label="主导航">
-      <button data-route="dashboard" class="nav-item active"><span><img src="/assets/icons/navigation/ic_nav_home.png" alt="" /></span><b>概况</b></button>
-      <button data-route="products" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_products.png" alt="" /></span><b>商品</b></button>
-      <button data-route="loans" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_lending.png" alt="" /></span><b>调借</b></button>
-      <button data-route="reports" class="nav-item"><span><img src="/assets/icons/actions/ic_action_sales_report.png" alt="" /></span><b>报表</b></button>
-      <button data-route="more" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_more.png" alt="" /></span><b>更多</b></button>
-    </nav>
+    <nav class="bottom-nav" aria-label="主导航"><button data-route="dashboard" class="nav-item active"><span><img src="/assets/icons/navigation/ic_nav_home.png" alt="" /></span><b>概况</b></button><button data-route="products" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_products.png" alt="" /></span><b>商品</b></button><button data-route="loans" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_lending.png" alt="" /></span><b>调借</b></button><button data-route="reports" class="nav-item"><span><img src="/assets/icons/actions/ic_action_sales_report.png" alt="" /></span><b>报表</b></button><button data-route="more" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_more.png" alt="" /></span><b>更多</b></button></nav>
   </div>
   <div id="modalRoot"></div><div id="toast" class="toast"></div>
   <script src="pwa.js?v=2.2.0"></script>
   <script src="cloud.js"></script>
-  <script src="sync-v2.js?v=2.1.0"></script>
+  <script src="sync-v3.js?v=3.0.0"></script>
   <script src="qinsilk-import.js"></script>
   <script src="content-workbench.js"></script>
   <script src="app.js"></script>
+  <script src="sales-cost-v3.js?v=3.0.0"></script>
+  <script src="performance-v3.js?v=3.0.0"></script>
   <script src="trade-gallery-queue.js?v=1.6.0"></script>
   <script src="business-ux-v2.js?v=2.2.0"></script>
   <script src="business-flow-v2.3.js?v=2.3.0"></script>
   <script src="ui-refine-v2.4.js?v=2.4.0"></script>
   <script src="ui-icons.js?v=1.4.0"></script>
   <script src="ui-shell-guard.js"></script>
-</body>
-</html>
+</body></html>
