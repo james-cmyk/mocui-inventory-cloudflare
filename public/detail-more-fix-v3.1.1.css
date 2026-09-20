@@ -1,10 +1,7 @@
-/* v3.1.1 商品详情去重 + 更多页紧凑化 */
-.mocui-more-compact{padding:2px 0 12px}
-.mocui-more-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.mocui-more-tile{appearance:none;border:1px solid #e7eaf0;background:#fff;border-radius:16px;min-height:78px;padding:12px 8px;font:inherit;color:#111827;box-shadow:0 1px 2px rgba(16,24,40,.02)}
-.mocui-more-tile span{display:block;font-size:15px;font-weight:700;line-height:1.2}
-.mocui-more-tile:active{transform:scale(.98);background:#f8fafc}
-.mocui-more-maintenance-toggle{width:100%;margin-top:12px;border:0;background:transparent;padding:12px 4px;color:#667085;font:inherit;font-size:13px;display:flex;justify-content:space-between;align-items:center}
-.mocui-maintenance-menu{display:grid;gap:8px}
-.mocui-maintenance-route{border:1px solid #e7eaf0;background:#fff;border-radius:14px;padding:15px 14px;font:inherit;font-weight:650;text-align:left;display:flex;justify-content:space-between}
-@media(max-width:380px){.mocui-more-grid{gap:8px}.mocui-more-tile{min-height:72px}}
+/* v3.1.3 hotfix - replacement for detail-more-fix-v3.1.1.css */
+.mocui-more-v313{padding:2px 0 16px}
+.mocui-more-v313-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mocui-more-v313-btn{appearance:none;border:1px solid #e4e7ec;background:#fff;border-radius:16px;min-height:78px;padding:10px 6px;color:#101828;font:inherit;font-size:15px;font-weight:750;box-shadow:0 1px 2px rgba(16,24,40,.02)}
+.mocui-more-v313-btn:active{transform:scale(.98);background:#f8fafc}
+.mocui-more-v313-maint{width:100%;margin-top:12px;padding:13px 4px;border:0;background:transparent;color:#667085;font:inherit;font-size:13px;display:flex;align-items:center;justify-content:space-between}
+@media(max-width:380px){.mocui-more-v313-grid{gap:8px}.mocui-more-v313-btn{min-height:72px}}
