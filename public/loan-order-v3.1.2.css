@@ -1,0 +1,4 @@
+/* v3.1.2 调借：未还优先，已还清自动下沉 */
+.loan-group-title{font-size:14px;font-weight:800;color:#344054;padding:15px 2px 8px;display:flex;align-items:center;gap:6px}
+.loan-group-title small{font-size:11px;font-weight:650;color:#98a2b3}
+.loan-group-completed{margin-top:10px;padding-top:18px;border-top:1px solid #eaecf0;color:#667085}
