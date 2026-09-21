@@ -1,0 +1,114 @@
+
+/* 漠翠进销存 v3.19 — iPhone/PWA interaction layer */
+:root{
+  --ios-top:env(safe-area-inset-top,0px);
+  --ios-bottom:env(safe-area-inset-bottom,0px);
+  --ios-nav-h:58px;
+  --ios-tap:44px;
+}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;overscroll-behavior-y:none}
+body{-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none}
+button,a,.clickable,.nav-item,.workflow-card{touch-action:manipulation}
+button,.btn,.icon-btn,.page-back,.modal-close,.nav-item{min-height:var(--ios-tap)}
+input,textarea,select,.input,.mini-input,.filter-select{font-size:16px!important}
+input,textarea,select{-webkit-appearance:none;appearance:none}
+textarea{resize:vertical;min-height:88px}
+
+/* Header: safe-area aware, less jumpy while scrolling */
+.topbar{
+  padding-top:max(8px,var(--ios-top))!important;
+  min-height:calc(56px + var(--ios-top));
+  position:sticky!important;top:0!important;z-index:80!important;
+  backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);
+}
+.top-title-group,.top-actions{min-width:0}
+.brand{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.subtitle{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58vw}
+.cloud-badge{white-space:nowrap}
+
+/* Main content never hides behind Home Indicator / bottom nav */
+.main{
+  padding-bottom:calc(var(--ios-nav-h) + var(--ios-bottom) + 22px)!important;
+  scroll-padding-top:calc(70px + var(--ios-top));
+  scroll-padding-bottom:calc(var(--ios-nav-h) + var(--ios-bottom) + 28px);
+}
+
+/* iOS tab bar */
+.bottom-nav{
+  min-height:calc(var(--ios-nav-h) + var(--ios-bottom))!important;
+  padding-bottom:var(--ios-bottom)!important;
+  backdrop-filter:saturate(180%) blur(22px);-webkit-backdrop-filter:saturate(180%) blur(22px);
+  transform:translateZ(0);
+}
+.nav-item{padding:5px 4px 4px!important}
+.nav-item span{min-height:25px;display:flex;align-items:center;justify-content:center}
+.nav-item img{width:22px;height:22px;object-fit:contain}
+.nav-item b{font-size:10.5px;line-height:14px}
+
+/* Tap targets + density */
+.btn{min-height:44px;padding:10px 14px}
+.btn.small{min-height:36px}
+.icon-btn,.page-back,.modal-close{min-width:44px}
+.list-item{min-height:64px}
+.workflow-card{min-height:82px}
+.segment{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.segment::-webkit-scrollbar{display:none}
+.segment button{min-height:38px;white-space:nowrap}
+.toolbar{gap:8px}
+.search input{min-height:44px}
+.form-row{gap:10px}
+
+/* Bottom-sheet behavior on iPhone; full modal remains full-screen */
+.modal-backdrop{
+  align-items:flex-end!important;
+  padding:0!important;
+  overscroll-behavior:contain;
+}
+.modal:not(.full){
+  width:100%!important;max-width:680px!important;
+  max-height:min(88dvh,760px)!important;
+  border-radius:20px 20px 0 0!important;
+  padding-bottom:var(--ios-bottom)!important;
+  box-shadow:0 -12px 40px rgba(16,24,40,.14);
+}
+.modal.full{
+  height:100dvh!important;max-height:100dvh!important;
+  padding-top:var(--ios-top)!important;padding-bottom:var(--ios-bottom)!important;
+}
+.modal-head{
+  position:sticky;top:0;z-index:3;
+  min-height:54px;
+  backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);
+}
+.modal-body{
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  padding-bottom:calc(18px + var(--ios-bottom))!important;
+  scroll-padding-bottom:calc(110px + var(--ios-bottom));
+}
+.sticky-actions{
+  position:sticky!important;bottom:0!important;z-index:4;
+  padding-bottom:max(10px,var(--ios-bottom))!important;
+  backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px);
+}
+
+/* Keyboard mode: remove bottom tab bar so focused fields/actions stay usable */
+html.ios-keyboard-open .bottom-nav{transform:translateY(110%);pointer-events:none}
+html.ios-keyboard-open .main{padding-bottom:24px!important}
+html.ios-keyboard-open .modal:not(.full){max-height:calc(var(--vvh,100dvh) - 8px)!important}
+html.ios-keyboard-open .sticky-actions{bottom:0!important}
+
+/* Press feedback without slow animation */
+@media (hover:none) and (pointer:coarse){
+  .btn:active,.nav-item:active,.clickable:active,.workflow-card:active,.icon-btn:active{transform:scale(.985);opacity:.78}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+@media (max-width:390px){
+  .main{padding-left:12px!important;padding-right:12px!important}
+  .grid-3{gap:7px!important}
+  .metric.compact{padding:10px!important}
+  .toolbar{flex-wrap:wrap}
+  .toolbar .search{min-width:100%;flex:1 0 100%}
+}
