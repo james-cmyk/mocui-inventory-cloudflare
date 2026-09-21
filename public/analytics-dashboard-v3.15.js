@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const VERSION='3.15.0';
+  const VERSION='3.17.0';
   function money(v){return `¥${Number(v||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;}
   async function refresh(){
     if(!window.MocuiAnalytics||!document.querySelector('.grid-2 .metric'))return;
@@ -12,5 +12,6 @@
     for(const [card,val] of pairs){const hint=card.querySelector('.hint');if(!hint)continue;hint.innerHTML=hint.innerHTML.replace(/正式\/调借\s*¥[\d,.]+(?:\.\d+)?/,`正式/调借 ${money(val)}`);}
   }
   window.addEventListener('mocui-analytics-ready',()=>{if(document.querySelector('#quickSale'))refresh().catch(()=>{});});
+  window.addEventListener('mocui-analytics-updated',()=>{if(document.querySelector('#quickSale'))refresh().catch(()=>{});});
   window.MocuiAnalyticsDashboard={version:VERSION,refresh};
 })();

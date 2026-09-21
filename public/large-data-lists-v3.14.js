@@ -156,7 +156,13 @@
     const gen=++generation.customers;setHeader('客户管理','按需读取客户；统计保持原账本口径',{label:'＋',onClick:()=>openCustomerForm()});
     $('#main').innerHTML=`<div class="toolbar"><div class="search"><input id="customerSearch" placeholder="客户姓名、电话模糊搜索"></div></div><div id="customerList" class="list"></div>`;let shown=PAGE_SIZE;
     const draw=async()=>{const q=$('#customerSearch')?.value||'',f=customerFilter(q);let rows,total;if(q){rows=await scanSearch('customers',q,null,shown);total=rows.length<shown?rows.length:shown+1;}else{const p=await page('customers',{offset:0,limit:shown,filter:f});rows=p.rows;total=p.hasMore?shown+1:rows.length;}
-      if(gen!==generation.customers||appState.route!=='customers')return;const host=$('#customerList');host.innerHTML=rows.length?rows.map(c=>`<div class="list-item clickable customer-row" data-id="${c.id}"><div class="thumb placeholder">客</div><div class="item-main"><div class="item-title">${esc(c.name)}</div><div class="item-meta">${esc(c.phone||'未填写电话')}</div></div></div>`).join(''):emptyState('♙','暂无客户');$$('.customer-row').forEach(el=>el.onclick=async()=>openCustomerForm(await dbGet('customers',el.dataset.id)));appendMore(host,rows.length,total,()=>{shown=Math.min(MAX_LOADED,shown+PAGE_SIZE);draw();});};
+      if(gen!==generation.customers||appState.route!=='customers')return;const host=$('#customerList');
+      let stats=new Map();
+      if(window.MocuiAnalytics?.customerStats){
+        const pairs=await Promise.all(rows.map(async c=>[c.id,await window.MocuiAnalytics.customerStats(c.id).catch(()=>null)]));
+        stats=new Map(pairs);
+      }
+      host.innerHTML=rows.length?rows.map(c=>{const st=stats.get(c.id);return `<div class="list-item clickable customer-row" data-id="${c.id}"><div class="thumb placeholder">客</div><div class="item-main"><div class="item-title">${esc(c.name)}</div><div class="item-meta">${esc(c.phone||'未填写电话')}${st?` · ${st.orders}单 · 累计 ¥${Number(st.amount||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2})}`:''}</div></div></div>`}).join(''):emptyState('♙','暂无客户');$$('.customer-row').forEach(el=>el.onclick=async()=>openCustomerForm(await dbGet('customers',el.dataset.id)));appendMore(host,rows.length,total,()=>{shown=Math.min(MAX_LOADED,shown+PAGE_SIZE);draw();});};
     await draw();$('#customerSearch').oninput=()=>{shown=PAGE_SIZE;draw();};
   }
 

@@ -1,5 +1,5 @@
-const CACHE='mocui-v3.16-analytics-reports';
-const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.15.0','./analytics-dashboard-v3.15.js?v=3.15.0','./analytics-reports-v3.16.js?v=3.16.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.17-incremental-analytics';
+const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -55,3 +55,5 @@ self.addEventListener('fetch',event=>{
 // v3.15.0：销售统计预计算缓存；独立 analytics DB，可重建，不作为业务账本。
 
 // v3.16.0 analytics reports
+
+// v3.17.0 incremental analytics + customer cumulative stats

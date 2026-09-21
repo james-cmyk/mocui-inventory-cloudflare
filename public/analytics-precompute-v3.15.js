@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const VERSION='3.15.0';
+  const VERSION='3.17.0';
   const DB_NAME='mocui_analytics_v315';
   const DB_VERSION=1;
   const SOURCE_DB='mocui_inventory_db';
@@ -113,6 +113,71 @@
     window.addEventListener('cloud-sync-ok',()=>{markDirty();setTimeout(()=>rebuild(false).catch(()=>{}),1800);});
   }
 
+
+  let mutationChain=Promise.resolve();
+  const sameSale=(a,b)=>JSON.stringify(a||null)===JSON.stringify(b||null);
+
+  async function getAgg(store,id){
+    const d=await openAnalytics();
+    return reqP(d.transaction(store,'readonly').objectStore(store).get(id));
+  }
+  async function putAgg(store,row){
+    const d=await openAnalytics();
+    return reqP(d.transaction(store,'readwrite').objectStore(store).put(row));
+  }
+  async function delAgg(store,id){
+    const d=await openAnalytics();
+    return reqP(d.transaction(store,'readwrite').objectStore(store).delete(id));
+  }
+  async function adjustBucket(store,id,m,sign){
+    if(!id)return;
+    const row=(await getAgg(store,id))||{id,...zero()};
+    add(row,m,sign);
+    row.orders=Math.max(0,n(row.orders));
+    if(row.orders===0)await delAgg(store,id); else await putAgg(store,row);
+  }
+  async function adjustCustomer(s,sign){
+    if(!active(s))return;
+    const id=customerId(s),d=await openAnalytics(),os=d.transaction('customers','readwrite').objectStore('customers');
+    const old=await reqP(os.get(id))||{id,name:s.customerName||'散客',orders:0,qty:0,amount:0,lastAt:''};
+    const m=metrics(s);old.orders=Math.max(0,n(old.orders)+sign);old.qty=n(old.qty)+sign*m.qty;old.amount=n(old.amount)+sign*m.revenue;
+    if(sign>0&&(!old.lastAt||new Date(s.createdAt)>new Date(old.lastAt)))old.lastAt=s.createdAt||'';
+    if(old.orders===0)await reqP(os.delete(id));else await reqP(os.put(old));
+  }
+  async function adjustProducts(s,sign){
+    if(!active(s))return;
+    const d=await openAnalytics(),tx=d.transaction('products','readwrite'),os=tx.objectStore('products');
+    for(const i of s.items||[]){
+      const id=String(i.productId||i.productName||'');if(!id)continue;
+      const old=await reqP(os.get(id))||{id,name:i.productName||'',color:i.color||'',qty:0,amount:0,profit:0};
+      const net=productNet(s,i),cost=n(i.costPrice)*n(i.qty);
+      old.qty=n(old.qty)+sign*n(i.qty);old.amount=n(old.amount)+sign*net;old.profit=n(old.profit)+sign*(net-cost);
+      if(Math.abs(old.qty)<1e-9&&Math.abs(old.amount)<.005)await reqP(os.delete(id));else await reqP(os.put(old));
+    }
+    await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error);});
+  }
+  async function applySaleDelta(oldSale,newSale){
+    await rebuild(false);
+    if(sameSale(oldSale,newSale))return;
+    for(const [sale,sign] of [[oldSale,-1],[newSale,1]]){
+      if(!sale||!active(sale))continue;
+      const dk=businessDay(sale),mk=monthKey(dk),m=metrics(sale);
+      await adjustBucket('daily',dk,m,sign);await adjustBucket('monthly',mk,m,sign);
+      await adjustCustomer(sale,sign);await adjustProducts(sale,sign);
+    }
+    const st=await meta('state')||{id:'state'};
+    await metaPut({...st,id:'state',ready:true,dirty:false,building:false,incrementalAt:Date.now(),version:VERSION});
+    window.dispatchEvent(new CustomEvent('mocui-analytics-updated'));
+  }
+  function queueSaleDelta(oldSale,newSale){
+    mutationChain=mutationChain.then(()=>applySaleDelta(oldSale,newSale)).catch(async e=>{
+      console.debug('[analytics incremental]',e?.message||e);
+      await metaPut({...(await meta('state').catch(()=>null)),id:'state',ready:false,dirty:true,building:false,dirtyAt:Date.now()}).catch(()=>{});
+      await rebuild(true).catch(()=>{});
+    });
+    return mutationChain;
+  }
+
   async function warm(){try{await rebuild(false);}catch(e){console.debug('[analytics]',e?.message||e);}}
   installSourceObserver().catch(()=>{});
   if('requestIdleCallback' in window)requestIdleCallback(warm,{timeout:8000});else setTimeout(warm,4000);
@@ -120,6 +185,7 @@
   window.MocuiAnalytics={
     version:VERSION,range,topCustomers:(n=20)=>top('customers',n),topProducts:(n=20)=>top('products',n),
     customerStats,rebuild:()=>rebuild(true),markDirty,
+    applySaleDelta:queueSaleDelta,
     state:()=>meta('state')
   };
 })();
