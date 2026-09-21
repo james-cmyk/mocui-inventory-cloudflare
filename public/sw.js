@@ -1,5 +1,5 @@
-const CACHE='mocui-v3.14-large-data-lists';
-const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.15-analytics-precompute';
+const CORE=['./','./index.html','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.15.0','./analytics-dashboard-v3.15.js?v=3.15.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -51,3 +51,5 @@ self.addEventListener('fetch',event=>{
 // v3.13.0：R2 320px 商品缩略图；原图永久保留，失败自动回退原图。
 
 // v3.14.0：销售/调借/库存流水/客户使用可重建轻量索引 + Cursor 分页；业务数据库 schema 不变。
+
+// v3.15.0：销售统计预计算缓存；独立 analytics DB，可重建，不作为业务账本。
