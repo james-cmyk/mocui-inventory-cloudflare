@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.8.0', MOBILE='(max-width:759px)';
+  const VERSION='4.8.1', MOBILE='(max-width:759px)';
   let raf=0;
   function safeInsets(){
     const el=document.createElement('div');

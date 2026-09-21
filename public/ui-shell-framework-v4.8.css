@@ -1,4 +1,4 @@
-/* 漠翠进销存 v3.22.0 — Floating Capsule Dock
+/* 漠翠进销存 v3.22.1 — Compact Floating Capsule Dock
  * One geometry owner: v4.8 owns the mobile shell and dock. The dock is a normal
  * flex child of #app (not viewport-fixed), so iOS standalone safe-area changes
  * cannot push it to a guessed position. v4.8 JS only measures the WebKit canvas tail.
@@ -6,8 +6,8 @@
 @media(max-width:759px){
   :root{
     --mocui-ios-canvas-tail:0px;
-    --mocui-dock-h:64px;
-    --mocui-dock-gap:10px;
+    --mocui-dock-h:54px;
+    --mocui-dock-gap:6px;
     --mocui-dock-x:18px;
   }
   html,body{width:100%!important;height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important;background:#f5f6f8!important}
@@ -33,11 +33,11 @@
     width:calc(100% - (2 * var(--mocui-dock-x)))!important;max-width:620px!important;
     height:var(--mocui-dock-h)!important;min-height:var(--mocui-dock-h)!important;max-height:var(--mocui-dock-h)!important;
     flex:0 0 var(--mocui-dock-h)!important;
-    margin:var(--mocui-dock-gap) auto calc(var(--mocui-dock-gap) + env(safe-area-inset-bottom,0px))!important;
-    padding:5px!important;box-sizing:border-box!important;
+    margin:6px auto 6px!important;
+    padding:4px!important;box-sizing:border-box!important;
     display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;align-items:stretch!important;
     overflow:hidden!important;background:rgba(255,255,255,.94)!important;
-    border:1px solid rgba(210,214,220,.96)!important;border-radius:34px!important;
+    border:1px solid rgba(210,214,220,.96)!important;border-radius:29px!important;
     box-shadow:0 8px 24px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.04)!important;
     z-index:1000!important;transform:none!important;filter:none!important;-webkit-filter:none!important;
     backdrop-filter:blur(18px) saturate(1.1)!important;-webkit-backdrop-filter:blur(18px) saturate(1.1)!important;
@@ -45,18 +45,18 @@
   }
   html body #app>.bottom-nav>.nav-item,html body.dock-js-fixed #app>.bottom-nav>.nav-item{
     appearance:none!important;-webkit-appearance:none!important;border:0!important;background:transparent!important;
-    width:100%!important;height:54px!important;min-height:54px!important;max-height:54px!important;
-    margin:0!important;padding:0!important;border-radius:27px!important;
+    width:100%!important;height:46px!important;min-height:46px!important;max-height:46px!important;
+    margin:0!important;padding:0!important;border-radius:23px!important;
     display:flex!important;align-items:center!important;justify-content:center!important;align-self:stretch!important;
     transform:none!important;visibility:visible!important;box-shadow:none!important;
   }
   html body #app>.bottom-nav>.nav-item.active{background:#eef0f3!important}
   html body #app>.bottom-nav>.nav-item span{
-    width:34px!important;height:34px!important;min-height:34px!important;margin:0!important;padding:0!important;
+    width:30px!important;height:30px!important;min-height:30px!important;margin:0!important;padding:0!important;
     display:flex!important;align-items:center!important;justify-content:center!important;
   }
   html body #app>.bottom-nav>.nav-item span img{
-    display:block!important;width:25px!important;height:25px!important;object-fit:contain!important;margin:0!important;opacity:.82!important;
+    display:block!important;width:23px!important;height:23px!important;object-fit:contain!important;margin:0!important;opacity:.82!important;
   }
   html body #app>.bottom-nav>.nav-item.active span img{opacity:1!important}
   /* Reference dock is icon-only. Keep labels in DOM for semantics, hide visually. */
