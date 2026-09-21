@@ -1,0 +1,105 @@
+
+/* v3.20.1 iPhone real-device hotfix
+   Restore the frozen mobile shell. This file intentionally loads LAST. */
+@media (max-width:759px){
+  /* 1) Header: v3.19 accidentally overrode ui-shell-stable's relative header.
+        Sticky + backdrop-filter inside the flex shell causes iOS text raster blur. */
+  #app>.topbar{
+    position:relative!important;
+    top:auto!important;
+    flex:0 0 auto!important;
+    min-height:0!important;
+    padding:14px 16px 12px!important;
+    transform:none!important;
+    background:#f5f6f8!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+
+  /* 2) Main is already the dedicated scroll container.
+        It must NOT reserve another fixed-nav safe area. */
+  #app>#main.main{
+    padding-bottom:24px!important;
+    scroll-padding-top:8px!important;
+    scroll-padding-bottom:24px!important;
+  }
+
+  /* 3) Restore the frozen 78px dock. v3.19's safe-area min-height/padding
+        was stacking on top of ui-shell-stable and made the dock too tall. */
+  #app>.bottom-nav{
+    position:relative!important;
+    inset:auto!important;
+    flex:0 0 78px!important;
+    width:100%!important;
+    height:78px!important;
+    min-height:78px!important;
+    max-height:78px!important;
+    padding:6px 8px 8px!important;
+    transform:none!important;
+    background:#fff!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+  #app>.bottom-nav>.nav-item{
+    min-height:62px!important;
+    padding:3px 0 2px!important;
+  }
+
+  /* 4) #main is the scroller, so sticky controls use top:0 inside #main,
+        never header-height + safe-area. The old value caused the report
+        tabs to float downward and cover "正式销售概况"/KPI cards. */
+  body[data-mocui-page="products"] .toolbar,
+  body[data-mocui-page="loans"] .toolbar{
+    top:0!important;
+  }
+  body[data-mocui-page="reports"] #v316range{
+    position:relative!important;
+    top:auto!important;
+    z-index:auto!important;
+    padding:0 0 3px!important;
+    margin-bottom:10px!important;
+    background:transparent!important;
+  }
+
+  /* 5) More page: ui-icons.js adds a PNG before v3.1.7's existing
+        character tile, producing the visible double-icon. Keep one icon only. */
+  body[data-mocui-page="more"] .more-core-v317-item>.ui-auto-icon,
+  body[data-ui-route="more"] .more-core-v317-item>.ui-auto-icon{
+    display:none!important;
+  }
+
+  /* 6) Keyboard: actually remove the flex dock while the visual viewport
+        is reduced. ui-shell-stable's !important transform prevented v3.19's
+        translateY approach from taking effect. */
+  html.ios-keyboard-open #app>.bottom-nav{
+    flex:0 0 0!important;
+    height:0!important;
+    min-height:0!important;
+    max-height:0!important;
+    padding:0!important;
+    border:0!important;
+    overflow:hidden!important;
+    opacity:0!important;
+    visibility:hidden!important;
+    pointer-events:none!important;
+  }
+  html.ios-keyboard-open #app>#main.main{
+    padding-bottom:12px!important;
+  }
+
+  /* 7) Report first screen: keep scope note and controls in normal flow. */
+  body[data-mocui-page="reports"] #v316body{
+    margin-top:0!important;
+  }
+  body[data-mocui-page="reports"] #v316body>.notice:first-child{
+    margin-top:0!important;
+  }
+}
+
+/* Never blur app text through a composited ancestor on iOS. */
+@supports (-webkit-touch-callout:none){
+  #app>.topbar,#app>.bottom-nav{
+    filter:none!important;
+    -webkit-filter:none!important;
+  }
+}
