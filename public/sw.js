@@ -1,4 +1,4 @@
-const CACHE='mocui-v3.20.1-iphone-hotfix';
+const CACHE='mocui-v3.20.2-iphone-header-fix';
 const CORE=['./','./index.html','./iphone-hotfix-v3.20.1.css?v=3.20.1','./iphone-hotfix-v3.20.1.js?v=3.20.1','./iphone-pages-v3.20.css?v=3.20.0','./iphone-pages-v3.20.js?v=3.20.0','./iphone-ux-v3.19.css?v=3.19.0','./iphone-ux-v3.19.js?v=3.19.0','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
@@ -65,3 +65,5 @@ self.addEventListener('fetch',event=>{
 // v3.20.0 page-level iPhone polish; visual/interaction only.
 
 // v3.20.1 real-device hotfix: restore frozen shell, report flow, single more icon.
+
+// v3.20.2: iPhone safe-area header + dashboard icon consistency.

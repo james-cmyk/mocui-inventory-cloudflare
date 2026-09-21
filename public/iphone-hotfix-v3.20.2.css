@@ -1,0 +1,112 @@
+
+/*
+ * 漠翠进销存 v3.20.2 — iPhone 真机第二轮修复
+ * 只修 UI 壳层与快捷入口图标，不碰业务数据。
+ */
+@media (max-width:759px){
+  /*
+   * 1. 顶部栏必须完整避开 Dynamic Island / 状态栏。
+   * v3.20.1 恢复 relative 后漏掉了 safe-area 的真实占位，
+   * 导致标题、同步状态、+ 按钮跑到系统状态栏下面。
+   */
+  #app>.topbar{
+    position:relative!important;
+    top:auto!important;
+    z-index:20!important;
+
+    flex:0 0 calc(52px + var(--ios-top, env(safe-area-inset-top, 0px)))!important;
+    width:100%!important;
+    min-height:calc(52px + var(--ios-top, env(safe-area-inset-top, 0px)))!important;
+
+    padding:
+      calc(var(--ios-top, env(safe-area-inset-top, 0px)) + 7px)
+      16px
+      9px!important;
+
+    display:flex!important;
+    align-items:flex-end!important;
+    justify-content:space-between!important;
+    box-sizing:border-box!important;
+
+    background:#f5f6f8!important;
+    border-bottom:1px solid rgba(228,231,236,.72)!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+    transform:none!important;
+  }
+
+  #app>.topbar .top-title-group,
+  #app>.topbar .top-actions{
+    min-width:0!important;
+    align-items:center!important;
+  }
+
+  #app>.topbar .brand{
+    display:block!important;
+    opacity:1!important;
+    visibility:visible!important;
+    line-height:1.18!important;
+  }
+
+  #app>.topbar .subtitle{
+    display:block!important;
+    opacity:1!important;
+    visibility:visible!important;
+    line-height:1.25!important;
+    margin-top:2px!important;
+  }
+
+  #app>.topbar .cloud-badge,
+  #app>.topbar #topAction{
+    visibility:visible!important;
+  }
+
+  /*
+   * 2. 主内容从 topbar 之后自然开始。
+   * 不再用 margin/padding 模拟状态栏，避免报表再次出现大空白。
+   */
+  #app>#main.main{
+    margin-top:0!important;
+    padding-top:12px!important;
+    scroll-padding-top:8px!important;
+  }
+
+  /*
+   * 3. 首页快捷卡片：自动图标装饰器只命中了“外部货/盘点”等少数入口，
+   * 真机上形成“有的有小图标、有的没有”的不一致。首页统一纯文字。
+   */
+  body[data-mocui-page="dashboard"] #main [id^="quick"]>.ui-auto-icon,
+  body[data-ui-route="dashboard"] #main [id^="quick"]>.ui-auto-icon{
+    display:none!important;
+  }
+
+  /*
+   * 4. 更多页继续保持 v3.20.1 的单图标规则，防止装饰器重新插入第二枚 PNG。
+   */
+  body[data-mocui-page="more"] .more-core-v317-item>.ui-auto-icon,
+  body[data-ui-route="more"] .more-core-v317-item>.ui-auto-icon{
+    display:none!important;
+  }
+
+  /*
+   * 5. 报表日期栏保持正常文档流。
+   * 顶部栏恢复 safe-area 后也不能重新变成 sticky 偏移。
+   */
+  body[data-mocui-page="reports"] #v316range{
+    position:relative!important;
+    top:auto!important;
+    z-index:auto!important;
+    margin-top:0!important;
+  }
+}
+
+/* iOS WebKit：顶部/底部文字不放进模糊合成层。 */
+@supports (-webkit-touch-callout:none){
+  #app>.topbar,
+  #app>.bottom-nav{
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+    filter:none!important;
+    -webkit-filter:none!important;
+  }
+}
