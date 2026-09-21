@@ -1,5 +1,5 @@
-const CACHE='mocui-v3.20.3-bottom-nav-fix';
-const CORE=['./','./index.html','./iphone-hotfix-v3.20.1.css?v=3.20.1','./iphone-hotfix-v3.20.1.js?v=3.20.1','./iphone-pages-v3.20.css?v=3.20.0','./iphone-pages-v3.20.js?v=3.20.0','./iphone-ux-v3.19.css?v=3.19.0','./iphone-ux-v3.19.js?v=3.19.0','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
+const CACHE='mocui-v3.21-shell-framework-v4';
+const CORE=['./ui-shell-framework-v4.css?v=4.0.0','./ui-shell-framework-v4.js?v=4.0.0','./','./index.html','./iphone-hotfix-v3.20.1.css?v=3.20.1','./iphone-hotfix-v3.20.1.js?v=3.20.1','./iphone-pages-v3.20.css?v=3.20.0','./iphone-pages-v3.20.js?v=3.20.0','./iphone-ux-v3.19.css?v=3.19.0','./iphone-ux-v3.19.js?v=3.19.0','./offline.html','./app.css','./ui-shell-stable.css','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=3.13.0','./large-data-lists-v3.14.js?v=3.14.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));
@@ -25,9 +25,11 @@ async function updateCache(request,cacheKey=request){
 }
 
 async function appShell(request,event){
-  const cached=(await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'));
-  if(cached){event.waitUntil(updateCache(request,'./index.html'));return cached;}
-  return (await updateCache(request,'./index.html'))||(await caches.match('./offline.html'))||Response.error();
+  // Navigation is network-first so a newly deployed shell framework is not
+  // hidden behind an old cached index.html. Offline still falls back safely.
+  const fresh=await updateCache(request,'./index.html');
+  if(fresh)return fresh;
+  return (await caches.match(request))||(await caches.match('./index.html'))||(await caches.match('./'))||(await caches.match('./offline.html'))||Response.error();
 }
 
 async function staleWhileRevalidate(request,event){
@@ -69,3 +71,5 @@ self.addEventListener('fetch',event=>{
 // v3.20.2: iPhone safe-area header + dashboard icon consistency.
 
 // v3.20.3: anchor the five-tab dock to the physical viewport bottom.
+
+// v3.21.0: frozen shell framework v4; navigation network-first; future UI must not own shell geometry.

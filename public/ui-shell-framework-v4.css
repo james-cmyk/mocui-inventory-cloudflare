@@ -1,0 +1,36 @@
+
+/*
+ * UI SHELL FRAMEWORK v4
+ * Frozen geometry contract:
+ *   topbar -> scrollable main -> 78px five-tab dock
+ * Visual layers may style these elements, but must not own their positioning.
+ */
+@media(max-width:759px){
+  html,body{
+    width:100%!important;
+    height:100%!important;
+    margin:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+  }
+  body{background:#fff!important}
+  #app{box-sizing:border-box!important}
+  #app>#main.main{-webkit-overflow-scrolling:touch!important;overscroll-behavior-y:contain!important}
+  #app>.bottom-nav{
+    display:grid!important;
+    grid-template-columns:repeat(5,minmax(0,1fr))!important;
+    box-sizing:border-box!important;
+    overflow:visible!important;
+  }
+  #app>.bottom-nav>.nav-item{
+    min-width:0!important;
+    visibility:visible!important;
+  }
+  /* Keyboard only changes visibility, never the shell coordinates. */
+  html.ios-keyboard-open #app>.bottom-nav,
+  body.keyboard-open #app>.bottom-nav{
+    opacity:0!important;
+    visibility:hidden!important;
+    pointer-events:none!important;
+  }
+}
