@@ -2230,3 +2230,19 @@ async function init(){
   });
 }
 window.addEventListener('DOMContentLoaded',()=>init().catch(failBoot));
+
+
+// v3.16 extension bridge — UI/performance integration only.
+window.appState=appState;
+window.setHeader=setHeader;
+window.renderReports=renderReports;
+window.renderSales=renderSales;
+window.renderLoans=renderLoans;
+window.renderLedger=renderLedger;
+window.renderCustomers=renderCustomers;
+window.dbGet=dbGet;
+window.dbAll=dbAll;
+window.dbPut=dbPut;
+window.dbAdd=dbAdd;
+window.dbDelete=dbDelete;
+window.dbClear=dbClear;
