@@ -1,0 +1,78 @@
+
+/*
+ * 漠翠进销存 v3.20.3
+ * iPhone bottom dock final-position hotfix.
+ * Only fixes the 5-tab bottom navigation position.
+ */
+@media (max-width:759px){
+  :root{
+    --mocui-dock-content-h:64px;
+    --mocui-dock-safe:env(safe-area-inset-bottom, 0px);
+    --mocui-dock-total:calc(var(--mocui-dock-content-h) + var(--mocui-dock-safe));
+  }
+
+  /*
+   * The dock must be anchored to the viewport, not remain as the last flex row.
+   * This removes the large blank area visible below the five navigation items
+   * on iPhone standalone/PWA screenshots.
+   */
+  #app>.bottom-nav{
+    position:fixed!important;
+    left:0!important;
+    right:0!important;
+    bottom:0!important;
+    top:auto!important;
+    z-index:1000!important;
+
+    width:100%!important;
+    height:var(--mocui-dock-total)!important;
+    min-height:var(--mocui-dock-total)!important;
+    max-height:var(--mocui-dock-total)!important;
+
+    flex:none!important;
+    margin:0!important;
+    padding:4px 8px var(--mocui-dock-safe)!important;
+    box-sizing:border-box!important;
+
+    display:grid!important;
+    grid-template-columns:repeat(5,minmax(0,1fr))!important;
+    align-items:center!important;
+
+    background:#fff!important;
+    border-top:1px solid rgba(228,231,236,.92)!important;
+    box-shadow:0 -1px 8px rgba(16,24,40,.025)!important;
+
+    transform:none!important;
+    backdrop-filter:none!important;
+    -webkit-backdrop-filter:none!important;
+  }
+
+  #app>.bottom-nav>.nav-item{
+    width:100%!important;
+    height:56px!important;
+    min-height:56px!important;
+    margin:0!important;
+    padding:3px 0 1px!important;
+    align-self:start!important;
+  }
+
+  /*
+   * Because the dock is now fixed/out of normal flex flow, reserve exactly
+   * its real height in #main so the last card/row can scroll above the dock.
+   */
+  #app>#main.main{
+    padding-bottom:calc(var(--mocui-dock-total) + 14px)!important;
+    scroll-padding-bottom:calc(var(--mocui-dock-total) + 14px)!important;
+  }
+
+  /*
+   * Keyboard mode: keep v3.20.1 behavior, but fully remove the fixed dock.
+   */
+  html.ios-keyboard-open #app>.bottom-nav{
+    display:none!important;
+  }
+  html.ios-keyboard-open #app>#main.main{
+    padding-bottom:12px!important;
+    scroll-padding-bottom:12px!important;
+  }
+}
