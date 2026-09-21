@@ -1,0 +1,46 @@
+
+/* UI SHELL FRAMEWORK v4.1 — iPhone PWA viewport fix */
+@media(max-width:759px){
+  html,body{
+    width:100%!important;height:100%!important;min-height:100%!important;
+    margin:0!important;padding:0!important;overflow:hidden!important;
+  }
+  body{background:#fff!important}
+  #app{
+    position:fixed!important;inset:0!important;
+    width:100%!important;height:100dvh!important;
+    min-height:100dvh!important;max-height:100dvh!important;
+    display:flex!important;flex-direction:column!important;
+    overflow:hidden!important;box-sizing:border-box!important;
+    padding:0!important;margin:0!important;
+  }
+  #app>.topbar{
+    position:relative!important;inset:auto!important;
+    flex:0 0 auto!important;width:100%!important;
+  }
+  #app>#main.main{
+    position:relative!important;flex:1 1 0%!important;min-height:0!important;
+    width:100%!important;overflow-y:auto!important;overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch!important;overscroll-behavior-y:contain!important;
+    padding-bottom:24px!important;scroll-padding-bottom:24px!important;
+  }
+  #app>.bottom-nav{
+    position:relative!important;inset:auto!important;
+    flex:0 0 78px!important;width:100%!important;
+    height:78px!important;min-height:78px!important;max-height:78px!important;
+    margin:0!important;padding:6px 8px max(8px,env(safe-area-inset-bottom,0px))!important;
+    display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;
+    align-items:start!important;overflow:hidden!important;box-sizing:border-box!important;
+    background:#fff!important;border-top:1px solid rgba(228,231,236,.92)!important;
+    transform:none!important;visibility:visible!important;opacity:1!important;z-index:100!important;
+  }
+  #app>.bottom-nav>.nav-item{
+    min-width:0!important;min-height:56px!important;visibility:visible!important;
+  }
+  html.ios-keyboard-open #app>.bottom-nav,
+  body.keyboard-open #app>.bottom-nav{
+    flex-basis:0!important;height:0!important;min-height:0!important;max-height:0!important;
+    padding:0!important;border:0!important;overflow:hidden!important;
+    opacity:0!important;visibility:hidden!important;pointer-events:none!important;
+  }
+}
