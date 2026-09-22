@@ -1,0 +1,97 @@
+/* 漠翠进销存 v3.22.5 — Canonical Floating Capsule Dock
+ * One geometry owner only: #main is the full-height scroller; the dock is a
+ * viewport overlay. No JS viewport math and no dock row participates in layout.
+ */
+@media(max-width:759px){
+  :root{
+    --mocui-dock-h:54px;
+    --mocui-dock-x:18px;
+    /* iPhone safe-area is much taller than the Home Indicator itself. Pull the
+       capsule into that safe-area instead of leaving a large dead strip below. */
+    --mocui-dock-bottom:max(10px, calc(env(safe-area-inset-bottom, 0px) - 20px));
+    /* Enough tail for the final record to scroll fully above the overlay. */
+    --mocui-dock-tail:calc(var(--mocui-dock-h) + var(--mocui-dock-bottom) + 16px);
+  }
+
+  html,body{
+    width:100%!important;height:100%!important;margin:0!important;padding:0!important;
+    overflow:hidden!important;background:#f5f6f8!important;
+  }
+  #app{
+    position:fixed!important;inset:0!important;width:auto!important;height:auto!important;
+    min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;
+    display:flex!important;flex-direction:column!important;overflow:hidden!important;
+    box-sizing:border-box!important;transform:none!important;background:#f5f6f8!important;
+  }
+  #app>.topbar{
+    position:relative!important;inset:auto!important;flex:0 0 auto!important;width:100%!important;
+    transform:none!important;filter:none!important;-webkit-filter:none!important;
+    backdrop-filter:none!important;-webkit-backdrop-filter:none!important;z-index:2!important;
+  }
+  #app>.topbar .top-title-group,#app>.topbar .top-title-group>div,
+  #app>.topbar .brand,#app>.topbar .subtitle{
+    transform:none!important;filter:none!important;-webkit-filter:none!important;
+    opacity:1!important;text-shadow:none!important;
+  }
+
+  /* Single scrolling surface. It fills every pixel behind/below the dock. */
+  #app>#main.main{
+    position:relative!important;flex:1 1 0%!important;min-height:0!important;width:100%!important;
+    margin-bottom:0!important;overflow-y:auto!important;overflow-x:hidden!important;
+    -webkit-overflow-scrolling:touch!important;overscroll-behavior-y:contain!important;
+    padding-bottom:var(--mocui-dock-tail)!important;
+    scroll-padding-bottom:var(--mocui-dock-tail)!important;
+    box-sizing:border-box!important;
+  }
+
+  /* Canonical dock geometry. It never consumes flex/layout height. */
+  html body #app>.bottom-nav,
+  html body.dock-js-fixed #app>.bottom-nav{
+    position:fixed!important;left:50%!important;right:auto!important;top:auto!important;
+    bottom:var(--mocui-dock-bottom)!important;
+    width:calc(100% - (2 * var(--mocui-dock-x)))!important;max-width:620px!important;
+    height:var(--mocui-dock-h)!important;min-height:var(--mocui-dock-h)!important;
+    max-height:var(--mocui-dock-h)!important;flex:none!important;
+    margin:0!important;padding:4px!important;box-sizing:border-box!important;
+    display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;
+    align-items:stretch!important;overflow:hidden!important;
+    background:rgba(255,255,255,.84)!important;
+    border:1px solid rgba(205,210,218,.80)!important;border-radius:29px!important;
+    box-shadow:0 8px 24px rgba(16,24,40,.09),0 1px 2px rgba(16,24,40,.04)!important;
+    z-index:1000!important;transform:translate3d(-50%,0,0)!important;
+    filter:none!important;-webkit-filter:none!important;
+    backdrop-filter:blur(20px) saturate(1.18)!important;
+    -webkit-backdrop-filter:blur(20px) saturate(1.18)!important;
+    opacity:1!important;visibility:visible!important;isolation:isolate!important;
+  }
+  html body #app>.bottom-nav>.nav-item,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item{
+    appearance:none!important;-webkit-appearance:none!important;border:0!important;
+    background:transparent!important;width:100%!important;height:46px!important;
+    min-height:46px!important;max-height:46px!important;margin:0!important;padding:0!important;
+    border-radius:23px!important;display:flex!important;align-items:center!important;
+    justify-content:center!important;align-self:stretch!important;transform:none!important;
+    visibility:visible!important;box-shadow:none!important;
+  }
+  html body #app>.bottom-nav>.nav-item.active{background:rgba(235,238,242,.86)!important}
+  html body #app>.bottom-nav>.nav-item span{
+    width:30px!important;height:30px!important;min-height:30px!important;margin:0!important;
+    padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;
+  }
+  html body #app>.bottom-nav>.nav-item span img{
+    display:block!important;width:23px!important;height:23px!important;object-fit:contain!important;
+    margin:0!important;opacity:.82!important;
+  }
+  html body #app>.bottom-nav>.nav-item.active span img{opacity:1!important}
+  html body #app>.bottom-nav>.nav-item b{
+    position:absolute!important;width:1px!important;height:1px!important;padding:0!important;
+    margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;
+    white-space:nowrap!important;border:0!important;
+  }
+
+  /* Keyboard is the only state allowed to remove the dock. */
+  html.ios-keyboard-open body #app>.bottom-nav,
+  body.keyboard-open #app>.bottom-nav{display:none!important}
+  html.ios-keyboard-open body #app>#main.main,
+  body.keyboard-open #app>#main.main{padding-bottom:12px!important;scroll-padding-bottom:12px!important}
+}
