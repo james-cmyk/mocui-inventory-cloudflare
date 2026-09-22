@@ -13,7 +13,7 @@
   html,body{width:100%!important;height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important;background:#f5f6f8!important}
   #app{
     position:fixed!important;top:0!important;left:0!important;right:0!important;
-    bottom:calc(-1 * var(--mocui-ios-canvas-tail))!important;
+    bottom:0!important;
     width:auto!important;height:auto!important;min-height:0!important;max-height:none!important;
     display:flex!important;flex-direction:column!important;overflow:hidden!important;
     margin:0!important;padding:0!important;box-sizing:border-box!important;transform:none!important;
@@ -33,7 +33,7 @@
 
   /* Overlay capsule. Same v3.22.1 geometry/position, but removed from flex flow. */
   html body #app>.bottom-nav,html body.dock-js-fixed #app>.bottom-nav{
-    position:absolute!important;
+    position:fixed!important;
     left:50%!important;right:auto!important;top:auto!important;bottom:calc(var(--mocui-dock-gap) + env(safe-area-inset-bottom, 0px))!important;
     width:calc(100% - (2 * var(--mocui-dock-x)))!important;max-width:620px!important;
     height:var(--mocui-dock-h)!important;min-height:var(--mocui-dock-h)!important;max-height:var(--mocui-dock-h)!important;
