@@ -1,0 +1,87 @@
+/* 漠翠进销存 v4.0.2 — Frozen Alipay-reference App Shell
+ * Visual source of truth: approved second mockup.
+ * This file is intentionally loaded LAST and owns all mobile dock geometry.
+ * Business/page styles must never reserve, size, or reposition the bottom dock.
+ */
+@media (max-width:759px){
+  :root{
+    --mocui-shell-dock-width:min(86vw,540px);
+    --mocui-shell-dock-height:72px;
+    --mocui-shell-dock-radius:999px;
+    --mocui-shell-dock-bottom:max(7px,calc(env(safe-area-inset-bottom,0px) - 27px));
+    --mocui-shell-dock-clearance:calc(var(--mocui-shell-dock-height) + var(--mocui-shell-dock-bottom) + 16px);
+    --mocui-shell-item-height:62px;
+  }
+
+  html,body{
+    width:100%!important;height:100dvh!important;min-height:100dvh!important;
+    margin:0!important;padding:0!important;overflow:hidden!important;background:#f5f6f8!important;
+  }
+  html body #app{
+    position:fixed!important;inset:0!important;width:100%!important;height:100dvh!important;
+    min-height:100dvh!important;max-height:100dvh!important;margin:0!important;padding:0!important;
+    display:flex!important;flex-direction:column!important;overflow:hidden!important;background:#f5f6f8!important;
+  }
+  html body #app>#main.main{
+    position:relative!important;flex:1 1 0%!important;min-height:0!important;width:100%!important;
+    margin:0!important;overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;
+    padding-bottom:var(--mocui-shell-dock-clearance)!important;
+    scroll-padding-bottom:var(--mocui-shell-dock-clearance)!important;
+    box-sizing:border-box!important;background:inherit!important;
+  }
+
+  html body #app>.bottom-nav,
+  html body.dock-js-fixed #app>.bottom-nav{
+    position:fixed!important;left:50%!important;right:auto!important;top:auto!important;
+    bottom:var(--mocui-shell-dock-bottom)!important;
+    width:var(--mocui-shell-dock-width)!important;max-width:540px!important;
+    height:var(--mocui-shell-dock-height)!important;min-height:var(--mocui-shell-dock-height)!important;max-height:var(--mocui-shell-dock-height)!important;
+    margin:0!important;padding:5px 7px!important;box-sizing:border-box!important;
+    display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;align-items:center!important;
+    overflow:hidden!important;background:rgba(255,255,255,.90)!important;
+    border:1px solid rgba(210,216,224,.80)!important;border-radius:var(--mocui-shell-dock-radius)!important;
+    box-shadow:0 12px 30px rgba(16,24,40,.13),0 2px 6px rgba(16,24,40,.05)!important;
+    transform:translate3d(-50%,0,0)!important;z-index:1000!important;
+    backdrop-filter:blur(24px) saturate(1.2)!important;-webkit-backdrop-filter:blur(24px) saturate(1.2)!important;
+    opacity:1!important;visibility:visible!important;
+  }
+
+  html body #app>.bottom-nav>.nav-item,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item{
+    appearance:none!important;-webkit-appearance:none!important;position:relative!important;
+    width:100%!important;height:var(--mocui-shell-item-height)!important;min-height:var(--mocui-shell-item-height)!important;max-height:var(--mocui-shell-item-height)!important;
+    margin:0!important;padding:4px 0 3px!important;border:0!important;border-radius:999px!important;
+    display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:1px!important;
+    background:transparent!important;color:#727982!important;box-shadow:none!important;transform:none!important;
+    font-size:11px!important;font-weight:650!important;line-height:14px!important;
+  }
+  html body #app>.bottom-nav>.nav-item.active,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item.active{
+    background:rgba(231,241,252,.96)!important;color:#0878e8!important;
+  }
+  html body #app>.bottom-nav>.nav-item>span,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item>span{
+    position:static!important;display:flex!important;align-items:center!important;justify-content:center!important;
+    width:28px!important;height:27px!important;min-height:27px!important;flex:0 0 27px!important;
+    margin:0!important;padding:0!important;overflow:visible!important;
+  }
+  html body #app>.bottom-nav>.nav-item>span>img,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item>span>img{
+    display:block!important;width:22px!important;height:22px!important;max-width:22px!important;max-height:22px!important;
+    margin:0!important;padding:0!important;object-fit:contain!important;opacity:.78!important;filter:none!important;-webkit-filter:none!important;
+  }
+  html body #app>.bottom-nav>.nav-item.active>span>img{opacity:1!important}
+  html body #app>.bottom-nav>.nav-item>b,
+  html body.dock-js-fixed #app>.bottom-nav>.nav-item>b{
+    all:unset!important;display:block!important;position:static!important;box-sizing:border-box!important;
+    width:auto!important;height:14px!important;min-height:14px!important;max-height:14px!important;
+    margin:0!important;padding:0!important;overflow:visible!important;visibility:visible!important;opacity:1!important;
+    clip:auto!important;clip-path:none!important;white-space:nowrap!important;
+    color:inherit!important;font-family:inherit!important;font-size:11px!important;font-weight:650!important;line-height:14px!important;
+  }
+
+  html.ios-keyboard-open body #app>.bottom-nav,
+  body.keyboard-open #app>.bottom-nav{display:none!important}
+  html.ios-keyboard-open body #app>#main.main,
+  body.keyboard-open #app>#main.main{padding-bottom:12px!important;scroll-padding-bottom:12px!important}
+}
