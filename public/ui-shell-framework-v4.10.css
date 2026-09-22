@@ -4,11 +4,11 @@
  */
 @media(max-width:759px){
   :root{
-    --mocui-dock-h:48px;
+    --mocui-dock-h:44px;
     --mocui-dock-x:18px;
     /* iPhone safe-area is much taller than the Home Indicator itself. Pull the
        capsule into that safe-area instead of leaving a large dead strip below. */
-    --mocui-dock-bottom:max(6px, calc(env(safe-area-inset-bottom, 0px) - 28px));
+    --mocui-dock-bottom:max(4px, calc(env(safe-area-inset-bottom, 0px) - 30px));
     /* Enough tail for the final record to scroll fully above the overlay. */
     --mocui-dock-tail:calc(var(--mocui-dock-h) + var(--mocui-dock-bottom) + 12px);
   }
@@ -57,7 +57,7 @@
     display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;
     align-items:stretch!important;overflow:hidden!important;
     background:rgba(255,255,255,.84)!important;
-    border:1px solid rgba(205,210,218,.80)!important;border-radius:25px!important;
+    border:1px solid rgba(205,210,218,.80)!important;border-radius:23px!important;
     box-shadow:0 8px 24px rgba(16,24,40,.09),0 1px 2px rgba(16,24,40,.04)!important;
     z-index:1000!important;transform:translate3d(-50%,0,0)!important;
     filter:none!important;-webkit-filter:none!important;
@@ -68,19 +68,19 @@
   html body #app>.bottom-nav>.nav-item,
   html body.dock-js-fixed #app>.bottom-nav>.nav-item{
     appearance:none!important;-webkit-appearance:none!important;border:0!important;
-    background:transparent!important;width:100%!important;height:42px!important;
-    min-height:42px!important;max-height:42px!important;margin:0!important;padding:0!important;
-    border-radius:21px!important;display:flex!important;align-items:center!important;
+    background:transparent!important;width:100%!important;height:38px!important;
+    min-height:38px!important;max-height:38px!important;margin:0!important;padding:0!important;
+    border-radius:19px!important;display:flex!important;align-items:center!important;
     justify-content:center!important;align-self:stretch!important;transform:none!important;
     visibility:visible!important;box-shadow:none!important;
   }
   html body #app>.bottom-nav>.nav-item.active{background:rgba(235,238,242,.86)!important}
   html body #app>.bottom-nav>.nav-item span{
-    width:30px!important;height:30px!important;min-height:30px!important;margin:0!important;
+    width:28px!important;height:28px!important;min-height:28px!important;margin:0!important;
     padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;
   }
   html body #app>.bottom-nav>.nav-item span img{
-    display:block!important;width:23px!important;height:23px!important;object-fit:contain!important;
+    display:block!important;width:22px!important;height:22px!important;object-fit:contain!important;
     margin:0!important;opacity:.82!important;
   }
   html body #app>.bottom-nav>.nav-item.active span img{opacity:1!important}

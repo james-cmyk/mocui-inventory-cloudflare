@@ -180,7 +180,7 @@
       filtered=products.filter(p=>
         (selectedCategoryId==='__all__'||categoryNodeMatchesProduct(selectedNode(),p,categories)) &&
         stockOK(p,stock) &&
-        (!q||[p.name,p.code,p.color,p.category,categoryPathLabel(p.category,categories)].some(v=>String(v||'').toLowerCase().includes(q)))
+        (!q||(window.MocuiCoreV4?.search?.match?window.MocuiCoreV4.search.match(q,p.name,p.code,p.color,p.category,categoryPathLabel(p.category,categories)):[p.name,p.code,p.color,p.category,categoryPathLabel(p.category,categories)].some(v=>String(v||'').toLowerCase().includes(q))))
       );
       const rows=filtered.slice(0,shown),host=$('#productList');
       host.innerHTML=rows.length?rows.map(p=>productListItem(p,categories)).join(''):emptyState('⌕','没有找到商品','可调整关键词或分类');

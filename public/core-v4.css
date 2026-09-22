@@ -1,0 +1,16 @@
+/* 漠翠进销存 4.0 — durable interaction primitives. Business pages may use these;
+   they must not own bottom-dock geometry. */
+.v4-check-wrap{position:relative;flex:0 0 26px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.v4-row-check{position:absolute;inset:0;width:26px;height:26px;margin:0;opacity:0;cursor:pointer}
+.v4-checkmark{width:24px;height:24px;border:1.5px solid #cbd2dc;border-radius:50%;background:#fff;color:transparent;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;line-height:1;box-sizing:border-box;transition:background .12s,border-color .12s,color .12s}
+.v4-row-check:checked+.v4-checkmark{background:#16a66a;border-color:#16a66a;color:#fff}
+.v4-selector-row,.v4-select-row{gap:10px;transition:border-color .12s,background .12s}
+.v4-selector-row.is-selected,.v4-select-row.is-selected{background:#f3fbf7;border-color:#a8e2c6}
+.return-entry-row.v4-select-row{display:flex;align-items:center}
+.v4-batch-sale-row{display:flex;align-items:center;gap:9px;padding:10px 0;border-bottom:1px solid #eef1f4}
+.v4-batch-sale-row:last-child{border-bottom:0}
+.v4-batch-fields{display:grid;grid-template-columns:70px 88px;gap:6px;flex:0 0 auto}
+.v4-batch-fields .mini-input{width:100%;box-sizing:border-box}
+.return-action-grid:has(#sellBatch){grid-template-columns:repeat(2,minmax(0,1fr))}
+#sellBatch{grid-column:1/-1}
+@media(max-width:420px){.v4-batch-fields{grid-template-columns:62px 78px}.v4-batch-sale-row .loan-thumb{width:42px;height:42px}}
