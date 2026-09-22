@@ -1,4 +1,4 @@
-/* 漠翠进销存 v3.22.2 — Translucent Overlay Capsule Dock
+/* 漠翠进销存 v3.22.3 — Full-canvas Overlay Capsule Dock
  * Root fix: the dock is an overlay, not a layout row. #main owns the full page
  * behind it; only end-of-scroll padding keeps the last record reachable.
  */
@@ -8,7 +8,7 @@
     --mocui-dock-h:54px;
     --mocui-dock-gap:6px;
     --mocui-dock-x:18px;
-    --mocui-dock-scroll-clearance:72px;
+    --mocui-dock-scroll-clearance:calc(var(--mocui-dock-h) + var(--mocui-dock-gap) + env(safe-area-inset-bottom, 0px) + 12px);
   }
   html,body{width:100%!important;height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important;background:#f5f6f8!important}
   #app{
@@ -34,7 +34,7 @@
   /* Overlay capsule. Same v3.22.1 geometry/position, but removed from flex flow. */
   html body #app>.bottom-nav,html body.dock-js-fixed #app>.bottom-nav{
     position:absolute!important;
-    left:50%!important;right:auto!important;top:auto!important;bottom:var(--mocui-dock-gap)!important;
+    left:50%!important;right:auto!important;top:auto!important;bottom:calc(var(--mocui-dock-gap) + env(safe-area-inset-bottom, 0px))!important;
     width:calc(100% - (2 * var(--mocui-dock-x)))!important;max-width:620px!important;
     height:var(--mocui-dock-h)!important;min-height:var(--mocui-dock-h)!important;max-height:var(--mocui-dock-h)!important;
     margin:0!important;padding:4px!important;box-sizing:border-box!important;

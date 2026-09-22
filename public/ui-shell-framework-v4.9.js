@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.9.0', MOBILE='(max-width:759px)';
+  const VERSION='4.9.1', MOBILE='(max-width:759px)';
   let raf=0;
   function safeInsets(){
     const el=document.createElement('div');
@@ -14,8 +14,22 @@
     raf=0;
     if(!matchMedia(MOBILE).matches){document.documentElement.style.removeProperty('--mocui-ios-canvas-tail');return}
     const s=safeInsets();
-    const raw=standalone()?Number(screen.height||0)-Number(innerHeight||0)-s.top:0;
-    const tail=Math.max(0,Math.min(s.bottom||80,Number.isFinite(raw)?raw:0));
+    // iOS standalone can expose a layout viewport that is materially shorter than
+    // the physical app canvas. The old code clamped this gap to safe-area-bottom,
+    // leaving a real unowned strip below #app. Measure the complete canvas gap.
+    // Do not use visualViewport.height here: it shrinks for the keyboard.
+    const viewportBase=Math.max(
+      Number(innerHeight)||0,
+      Number(document.documentElement.clientHeight)||0
+    );
+    const screenTarget=standalone()?Math.max(
+      Number(screen.height)||0,
+      Number(screen.availHeight)||0
+    ):viewportBase;
+    const raw=standalone()?screenTarget-viewportBase:0;
+    // A large but finite guard protects against broken orientation metrics while
+    // still covering the ~100-200px standalone canvas gap seen on iOS 26.
+    const tail=Math.max(0,Math.min(260,Number.isFinite(raw)?raw:0));
     document.documentElement.style.setProperty('--mocui-ios-canvas-tail',`${Math.round(tail*100)/100}px`);
     document.body.dataset.shellFramework=VERSION;
     document.body.classList.remove('dock-js-fixed');
@@ -26,7 +40,7 @@
     const app=document.querySelector('#app'),nav=document.querySelector('#app>.bottom-nav'),s=safeInsets();
     if(!app||!nav)return {ok:false,reason:'missing-shell',version:VERSION};
     const ar=app.getBoundingClientRect(),nr=nav.getBoundingClientRect(),cs=getComputedStyle(nav);
-    return {version:VERSION,standalone:standalone(),screenHeight:screen.height,innerHeight,clientHeight:document.documentElement.clientHeight,visualViewportHeight:visualViewport?.height??null,safeTop:s.top,safeBottom:s.bottom,canvasTail:getComputedStyle(document.documentElement).getPropertyValue('--mocui-ios-canvas-tail').trim(),appBottom:ar.bottom,navTop:nr.top,navBottom:nr.bottom,navHeight:nr.height,navWidth:nr.width,navRadius:cs.borderRadius,layout:'floating-capsule-overlay'};
+    return {version:VERSION,standalone:standalone(),screenHeight:screen.height,innerHeight,clientHeight:document.documentElement.clientHeight,visualViewportHeight:visualViewport?.height??null,safeTop:s.top,safeBottom:s.bottom,canvasTail:getComputedStyle(document.documentElement).getPropertyValue('--mocui-ios-canvas-tail').trim(),appBottom:ar.bottom,navTop:nr.top,navBottom:nr.bottom,navHeight:nr.height,navWidth:nr.width,navRadius:cs.borderRadius,layout:'full-canvas-floating-capsule-overlay'};
   }
   function start(){
     calibrate();window.MocuiShellFramework={version:VERSION,verify,calibrate};
