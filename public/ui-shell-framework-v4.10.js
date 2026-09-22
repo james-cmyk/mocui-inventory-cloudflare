@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.0.0';
+  const VERSION='4.0.1';
   function standalone(){return !!(window.matchMedia?.('(display-mode: standalone)').matches||navigator.standalone===true)}
   function normalize(){
     /* Retire every historical JS dock coordinate. CSS is the sole geometry owner. */
@@ -15,7 +15,7 @@
     const ar=app.getBoundingClientRect(),mr=main.getBoundingClientRect(),nr=nav.getBoundingClientRect();
     const root=getComputedStyle(document.documentElement);
     return {
-      ok:nr.height>=43&&nr.height<=45&&nr.bottom<=Math.max(innerHeight,document.documentElement.clientHeight)+1,
+      ok:nr.height>=63&&nr.height<=65&&nr.width<=Math.min(innerWidth*.90,562)&&nr.bottom<=Math.max(innerHeight,document.documentElement.clientHeight)+1,
       version:VERSION,standalone:standalone(),innerHeight,
       clientHeight:document.documentElement.clientHeight,
       visualViewportHeight:window.visualViewport?.height??null,
@@ -23,7 +23,7 @@
       navTop:Math.round(nr.top),navBottom:Math.round(nr.bottom),navHeight:Math.round(nr.height),
       dockBottom:root.getPropertyValue('--mocui-dock-bottom').trim(),
       dockTail:root.getPropertyValue('--mocui-dock-tail').trim(),
-      layout:'v4-alipay-canonical-overlay'
+      layout:'v4.0.1-alipay-full-canvas-pill'
     };
   }
   function start(){
