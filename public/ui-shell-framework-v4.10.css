@@ -1,25 +1,26 @@
-/* 漠翠进销存 v3.22.5 — Canonical Floating Capsule Dock
+/* 漠翠进销存 v3.22.6 — Full-Viewport Compact Capsule Dock
  * One geometry owner only: #main is the full-height scroller; the dock is a
  * viewport overlay. No JS viewport math and no dock row participates in layout.
  */
 @media(max-width:759px){
   :root{
-    --mocui-dock-h:54px;
+    --mocui-dock-h:48px;
     --mocui-dock-x:18px;
     /* iPhone safe-area is much taller than the Home Indicator itself. Pull the
        capsule into that safe-area instead of leaving a large dead strip below. */
-    --mocui-dock-bottom:max(10px, calc(env(safe-area-inset-bottom, 0px) - 20px));
+    --mocui-dock-bottom:max(6px, calc(env(safe-area-inset-bottom, 0px) - 28px));
     /* Enough tail for the final record to scroll fully above the overlay. */
-    --mocui-dock-tail:calc(var(--mocui-dock-h) + var(--mocui-dock-bottom) + 16px);
+    --mocui-dock-tail:calc(var(--mocui-dock-h) + var(--mocui-dock-bottom) + 12px);
   }
 
   html,body{
-    width:100%!important;height:100%!important;margin:0!important;padding:0!important;
+    width:100%!important;height:100dvh!important;min-height:100dvh!important;margin:0!important;padding:0!important;
     overflow:hidden!important;background:#f5f6f8!important;
   }
   #app{
-    position:fixed!important;inset:0!important;width:auto!important;height:auto!important;
-    min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;
+    position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:auto!important;
+    width:100%!important;height:100dvh!important;min-height:100dvh!important;max-height:100dvh!important;
+    margin:0!important;padding:0!important;
     display:flex!important;flex-direction:column!important;overflow:hidden!important;
     box-sizing:border-box!important;transform:none!important;background:#f5f6f8!important;
   }
@@ -52,11 +53,11 @@
     width:calc(100% - (2 * var(--mocui-dock-x)))!important;max-width:620px!important;
     height:var(--mocui-dock-h)!important;min-height:var(--mocui-dock-h)!important;
     max-height:var(--mocui-dock-h)!important;flex:none!important;
-    margin:0!important;padding:4px!important;box-sizing:border-box!important;
+    margin:0!important;padding:3px!important;box-sizing:border-box!important;
     display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;
     align-items:stretch!important;overflow:hidden!important;
     background:rgba(255,255,255,.84)!important;
-    border:1px solid rgba(205,210,218,.80)!important;border-radius:29px!important;
+    border:1px solid rgba(205,210,218,.80)!important;border-radius:25px!important;
     box-shadow:0 8px 24px rgba(16,24,40,.09),0 1px 2px rgba(16,24,40,.04)!important;
     z-index:1000!important;transform:translate3d(-50%,0,0)!important;
     filter:none!important;-webkit-filter:none!important;
@@ -67,9 +68,9 @@
   html body #app>.bottom-nav>.nav-item,
   html body.dock-js-fixed #app>.bottom-nav>.nav-item{
     appearance:none!important;-webkit-appearance:none!important;border:0!important;
-    background:transparent!important;width:100%!important;height:46px!important;
-    min-height:46px!important;max-height:46px!important;margin:0!important;padding:0!important;
-    border-radius:23px!important;display:flex!important;align-items:center!important;
+    background:transparent!important;width:100%!important;height:42px!important;
+    min-height:42px!important;max-height:42px!important;margin:0!important;padding:0!important;
+    border-radius:21px!important;display:flex!important;align-items:center!important;
     justify-content:center!important;align-self:stretch!important;transform:none!important;
     visibility:visible!important;box-shadow:none!important;
   }

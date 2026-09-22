@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.10.0';
+  const VERSION='4.10.1';
   function standalone(){return !!(window.matchMedia?.('(display-mode: standalone)').matches||navigator.standalone===true)}
   function normalize(){
     /* Retire every historical JS dock coordinate. CSS is the sole geometry owner. */
@@ -15,7 +15,7 @@
     const ar=app.getBoundingClientRect(),mr=main.getBoundingClientRect(),nr=nav.getBoundingClientRect();
     const root=getComputedStyle(document.documentElement);
     return {
-      ok:nr.height>50&&nr.height<58&&nr.bottom<=innerHeight&&ar.bottom>=innerHeight-1,
+      ok:nr.height>=47&&nr.height<=50&&nr.bottom<=Math.max(innerHeight,document.documentElement.clientHeight)+1,
       version:VERSION,standalone:standalone(),innerHeight,
       clientHeight:document.documentElement.clientHeight,
       visualViewportHeight:window.visualViewport?.height??null,
@@ -23,7 +23,7 @@
       navTop:Math.round(nr.top),navBottom:Math.round(nr.bottom),navHeight:Math.round(nr.height),
       dockBottom:root.getPropertyValue('--mocui-dock-bottom').trim(),
       dockTail:root.getPropertyValue('--mocui-dock-tail').trim(),
-      layout:'canonical-fixed-overlay'
+      layout:'full-dvh-compact-overlay'
     };
   }
   function start(){
