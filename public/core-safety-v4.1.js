@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.1.3';
+  const VERSION='4.1.4';
   const DB_NAME='mocui_inventory_db', DB_VERSION=2;
   const STORES=['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
   const SNAP_PREFIX='mocui_v41_snapshot:';
@@ -18,11 +18,14 @@
   function loanReturned(l,i){if(i?.returnedQty!==undefined)return Math.min(num(i.qty),Math.max(0,num(i.returnedQty)));return (l.returns||[]).reduce((s,e)=>s+num((e.items||[]).find(x=>x.productId===i?.productId)?.qty),0);}
   function loanSold(l,i){if(i?.soldQty!==undefined)return Math.min(num(i.qty),Math.max(0,num(i.soldQty)));return (l.saleEvents||[]).filter(e=>e.status!=='cancelled').reduce((s,e)=>s+num((e.items||[]).find(x=>x.productId===i?.productId)?.qty),0);}
   function syncSnapshot(){const c=window.CloudSync||{};return {mode:c.mode||'unknown',revision:Number(c.revision||0),deviceId:String(c.deviceId||'').slice(0,12),available:!!window.CloudSync};}
+  const BASELINE_ID='ledgerBaselineV414';
+  function baselineFromSettings(settings){const b=(settings||[]).find(x=>x&&x.id===BASELINE_ID);return b&&b.establishedAt&&b.stocks&&typeof b.stocks==='object'?b:null;}
   async function scan(){
     if(state.running)return state.last; state.running=true;
     const started=Date.now(),issues=[],warnings=[];
     try{
-      const d=await readAll(),products=d.products||[],sales=d.sales||[],loans=d.loans||[],moves=d.stockMoves||[];
+      const d=await readAll(),products=d.products||[],sales=d.sales||[],loans=d.loans||[],moves=d.stockMoves||[],baseline=baselineFromSettings(d.settings);
+      const baselineTime=baseline?new Date(baseline.establishedAt).getTime():0;
       const pids=new Set(products.map(x=>x.id)), saleIds=new Set(sales.map(x=>x.id));
       for(const code of dup(products,'code'))issues.push({type:'duplicate_product_code',level:'error',text:`重复商品编码：${code}`});
       for(const no of dup(sales,'orderNo'))issues.push({type:'duplicate_sale_no',level:'error',text:`重复销售单号：${no}`});
@@ -41,10 +44,19 @@
       for(const sale of sales){if(sale.status==='cancelled')continue;for(const item of sale.items||[]){if(!item.productId)continue;if(!saleRefsByProduct.has(item.productId))saleRefsByProduct.set(item.productId,[]);saleRefsByProduct.get(item.productId).push({id:sale.id,no:sale.orderNo||sale.id,date:sale.saleDate||sale.createdAt,qty:num(item.qty),status:sale.status||'active'});}}
       for(const loan of loans){for(const item of loan.items||[]){if(!item.productId)continue;if(!loanRefsByProduct.has(item.productId))loanRefsByProduct.set(item.productId,[]);loanRefsByProduct.get(item.productId).push({id:loan.id,no:loan.loanNo||loan.id,date:loan.loanDate||loan.createdAt,qty:num(item.qty),status:loan.status||'active'});}}
       const stockDiffRows=[];let chainBreaks=0;
-      for(const p of products){const list=(byProduct.get(p.id)||[]).sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0));let expected=0,broken=false;for(const m of list){if(Math.abs(num(m.beforeStock)-expected)>1e-8&&m.type!=='ledger_reconcile')broken=true;expected+=num(m.qtyChange);if(Math.abs(num(m.afterStock)-expected)>1e-8)broken=true;}const current=num(p.stock),difference=current-expected;if(Math.abs(difference)>1e-8)stockDiffRows.push({productId:p.id,productCode:p.code||'',productName:p.name||'未命名商品',current,expected,difference,chainBroken:broken,sales:(saleRefsByProduct.get(p.id)||[]).slice(-8),loans:(loanRefsByProduct.get(p.id)||[]).slice(-8),recentMoves:list.slice(-8).map(m=>({id:m.id,type:m.type,createdAt:m.createdAt,qtyChange:num(m.qtyChange),beforeStock:num(m.beforeStock),afterStock:num(m.afterStock),refType:m.refType||'',refId:m.refId||''}))});if(broken)chainBreaks++;}
+      for(const p of products){
+        const all=(byProduct.get(p.id)||[]).sort((a,b)=>new Date(a.createdAt||0)-new Date(b.createdAt||0));
+        const hasBase=!!(baseline&&Object.prototype.hasOwnProperty.call(baseline.stocks,p.id));
+        const list=hasBase?all.filter(m=>new Date(m.createdAt||0).getTime()>baselineTime):all;
+        let expected=hasBase?num(baseline.stocks[p.id]):0,broken=false;
+        for(const m of list){if(Math.abs(num(m.beforeStock)-expected)>1e-8&&m.type!=='ledger_reconcile')broken=true;expected+=num(m.qtyChange);if(Math.abs(num(m.afterStock)-expected)>1e-8)broken=true;}
+        const current=num(p.stock),difference=current-expected;
+        if(Math.abs(difference)>1e-8)stockDiffRows.push({productId:p.id,productCode:p.code||'',productName:p.name||'未命名商品',current,expected,difference,chainBroken:broken,sales:(saleRefsByProduct.get(p.id)||[]).filter(x=>!hasBase||new Date(x.date||0).getTime()>baselineTime).slice(-8),loans:(loanRefsByProduct.get(p.id)||[]).filter(x=>!hasBase||new Date(x.date||0).getTime()>baselineTime).slice(-8),recentMoves:list.slice(-8).map(m=>({id:m.id,type:m.type,createdAt:m.createdAt,qtyChange:num(m.qtyChange),beforeStock:num(m.beforeStock),afterStock:num(m.afterStock),refType:m.refType||'',refId:m.refId||''}))});
+        if(broken)chainBreaks++;
+      }
       if(stockDiffRows.length)issues.push({type:'stock_diff',level:'error',text:`${stockDiffRows.length} 个商品当前库存与流水推算不一致`,count:stockDiffRows.length,details:stockDiffRows});
       if(chainBreaks)warnings.push({type:'stock_chain',level:'warn',text:`${chainBreaks} 个商品的库存流水前后值存在断点`,count:chainBreaks});
-      const report={version:VERSION,ok:issues.length===0,startedAt:new Date(started).toISOString(),finishedAt:new Date().toISOString(),durationMs:Date.now()-started,counts:Object.fromEntries(STORES.map(s=>[s,(d[s]||[]).length])),issues,warnings,sync:syncSnapshot()};
+      const report={version:VERSION,ok:issues.length===0,startedAt:new Date(started).toISOString(),finishedAt:new Date().toISOString(),durationMs:Date.now()-started,counts:Object.fromEntries(STORES.map(s=>[s,(d[s]||[]).length])),issues,warnings,sync:syncSnapshot(),baseline:baseline?{establishedAt:baseline.establishedAt,productCount:Object.keys(baseline.stocks||{}).length}:null};
       state.last=report;localStorage.setItem('mocui_v41_last_health',JSON.stringify(report));window.dispatchEvent(new CustomEvent('mocui-v41-health',{detail:report}));return report;
     }catch(e){const report={version:VERSION,ok:false,finishedAt:new Date().toISOString(),durationMs:Date.now()-started,counts:{},issues:[{type:'scan_error',level:'error',text:e?.message||String(e)}],warnings:[],sync:syncSnapshot()};state.last=report;return report;}
     finally{state.running=false;}
