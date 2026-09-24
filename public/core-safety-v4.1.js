@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const VERSION='4.1.0';
+  const VERSION='4.1.1';
   const DB_NAME='mocui_inventory_db', DB_VERSION=2;
   const STORES=['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
   const SNAP_PREFIX='mocui_v41_snapshot:';
