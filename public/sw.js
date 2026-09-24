@@ -1,6 +1,6 @@
-const CACHE='mocui-v4.1.1-inventory-diagnosis';
-const CORE=['./','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1','./ui-shell-stable.css','./ui-shell-framework-v4.10.css?v=4.0.2','./ui-shell-framework-v4.10.js?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app.js?v=4.1.1','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=4.0.0','./large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
-  './core-safety-v4.1.js?v=4.1.1','./core-safety-v4.1.css?v=4.1.1'
+const CACHE='mocui-v4.1.2-native-health-render';
+const CORE=['./','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1','./ui-shell-stable.css','./ui-shell-framework-v4.10.css?v=4.0.2','./ui-shell-framework-v4.10.js?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app-core-v4.1.2.js?v=4.1.2','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=4.0.0','./large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
+  './core-safety-v4.1.js?v=4.1.2','./core-safety-v4.1.css?v=4.1.2'
 ];
 
 self.addEventListener('install',event=>{
@@ -46,7 +46,7 @@ self.addEventListener('fetch',event=>{
   if(event.request.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/')) return;
   if(event.request.mode==='navigate'&&url.pathname==='/share.html'){event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match('./share.html')||Response.error()));return;}
   if(event.request.mode==='navigate'){event.respondWith(appShell(event.request,event));return;}
-  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(staleWhileRevalidate(event.request,event));return;}
+  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(updateCache(event.request,event.request).then(response=>response||caches.match(event.request)||Response.error()));return;}
   event.respondWith(caches.match(event.request).then(cached=>cached||updateCache(event.request).then(response=>response||Response.error())));
 });
 
