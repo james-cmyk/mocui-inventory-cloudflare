@@ -3,8 +3,8 @@
 const DB_NAME = 'mocui_inventory_db';
 const DB_VERSION = 2;
 const STORES = ['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
-const MAIN_ROUTES = new Set(['dashboard','products','sale-new','loans','reports','more']);
-const ROUTE_PARENTS = {'product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans','trade-gallery':'more',accessories:'settings'};
+const MAIN_ROUTES = new Set(['dashboard','products','loans','reports','more']);
+const ROUTE_PARENTS = {'sale-new':'dashboard','product-detail':'products','product-content':'products',content:'more',customers:'more',stocktake:'more',ledger:'more',settings:'more',audit:'settings',health:'settings','qinsilk-import':'more','pass-deals':'more','pass-deal-new':'pass-deals','external-goods':'loans','trade-gallery':'more',accessories:'settings'};
 let db;
 let routeStack=[];
 let appState = { route:'dashboard', params:{}, saleDraft:null, loanDraft:null, passDealDraft:null, qinsilkFiles:[], qinsilkBackupDone:false, qinsilkLastResult:null };
@@ -32,6 +32,7 @@ async function withCoreActionLock(key,btn,busyText,fn){
   try{return await fn();}
   finally{coreActionLocks.delete(key);if(btn&&document.body.contains(btn))setCoreButtonBusy(btn,false);}
 }
+window.MocuiCoreActions={version:'4.1.0',withLock:withCoreActionLock,active:()=>[...coreActionLocks]};
 function coreHandlerStatus(){
   const checks=[
     ['销售开单',typeof saveSale==='function'],['新增/编辑商品',typeof openProductForm==='function'],
@@ -444,6 +445,19 @@ async function openLoanContractForm(loanId,docType='agreement',docId=''){
 }
 
 
+function clearFieldValidation(){
+  $$('.field-invalid').forEach(el=>el.classList.remove('field-invalid'));
+  document.querySelector('#formValidationNotice')?.remove();
+}
+function showFieldValidation(message,el=null){
+  clearFieldValidation();
+  if(el){el.classList.add('field-invalid');try{el.scrollIntoView({behavior:'smooth',block:'center'});}catch(_){el.scrollIntoView();}setTimeout(()=>{try{el.focus({preventScroll:true});}catch(_){el.focus();}},220);}
+  const host=$('#main')||$('.modal-body');
+  if(host){const note=document.createElement('div');note.id='formValidationNotice';note.className='form-validation-notice';note.textContent=message;host.prepend(note);}
+  showToast(message);
+  return false;
+}
+function validateRequiredField(el,message){return el&&String(el.value??'').trim()?true:showFieldValidation(message,el);}
 function setHeader(title,subtitle='',action=null){
   $('.brand').textContent=title; $('#pageSubtitle').textContent=subtitle;
   const back=$('#pageBack');const canBack=!MAIN_ROUTES.has(appState.route)&&(routeStack.length>0||ROUTE_PARENTS[appState.route]);
@@ -1042,8 +1056,12 @@ async function saveSale(){
   syncSaleFormToDraft();
   const d=appState.saleDraft;
   const btn=$('#saveSale');
-  if(!d?.items?.length){showToast('请选择商品');return;}
-  if(d.items.some(i=>n(i.qty)<=0)){showToast('商品数量必须大于0');return;}
+  clearFieldValidation();
+  if(!d?.items?.length){showFieldValidation('还没有选择商品，请先选择至少 1 件商品。',$('#chooseProducts'));return;}
+  if(!d.createdAt||Number.isNaN(new Date(d.createdAt).getTime())){showFieldValidation('请填写有效的销售时间。',$('#saleDate'));return;}
+  const badLine=[...$$('.sale-line')].find(el=>n($('.line-qty',el)?.value)<=0||n($('.line-price',el)?.value)<0);
+  if(badLine){const q=$('.line-qty',badLine),price=$('.line-price',badLine);showFieldValidation(n(q?.value)<=0?'商品数量必须大于 0。':'销售单价不能小于 0。',n(q?.value)<=0?q:price);return;}
+  if(n($('#received')?.value)<0){showFieldValidation('本次实收不能小于 0。',$('#received'));return;}
   if(btn?.dataset.submitting==='1')return;
   if(btn){btn.dataset.submitting='1';btn.disabled=true;btn.textContent='正在开单…';}
   try{
@@ -1215,7 +1233,7 @@ async function renderLoanFormModal(){
     </div>
     <div class="loan-step-card"><div class="loan-step-title"><span>3</span> 选择商品与数量</div><button id="loanChooseProducts" type="button" class="btn secondary block">＋ 选择调借商品（可多选）</button><div id="loanItems" style="margin-top:10px">${itemHTML}</div><div id="loanInventorySummary" class="notice ${d.type==='borrow'?'success':'warn'}"></div></div>
     <div class="sticky-actions"><button id="saveLoan" class="btn block" type="submit">保存调借单并同步库存</button></div>
-  </form>`,{full:true,closeLabel:'← 返回',onOpen:()=>{
+  </form>`,{full:true,closeLabel:'返回',onOpen:()=>{
     const sync=()=>{d.type=$('#loanType').value;d.person=$('#loanPerson').value.trim();d.date=$('#loanDate').value;d.expectedReturnDate=$('#loanExpectedReturnDate').value;d.note=$('#loanNote').value;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)];if(item)item.qty=n($('.loan-qty',el).value);});const compact={...d,images:[],items:d.items.map(i=>({...i,image:''}))};saveLocalDraft('mocui_loan_draft_v1',compact);};
     const renderImages=()=>{$('#loanImageCount').textContent=`已选 ${d.images.length}/12 张`;$('#loanImagePreview').innerHTML=d.images.map((src,idx)=>`<div class="upload-thumb-wrap"><img src="${src}" alt="调借备注图片 ${idx+1}"><button type="button" class="remove-upload-image" data-image-index="${idx}" aria-label="删除图片">×</button></div>`).join('');$$('.remove-upload-image').forEach(btn=>btn.onclick=()=>{d.images.splice(n(btn.dataset.imageIndex),1);renderImages();});};
     const updateInventoryPreview=()=>{sync();const dir=d.type==='borrow'?1:-1;let totalQty=0,invalid=0;$$('[data-loan-index]').forEach(el=>{const item=d.items[n(el.dataset.loanIndex)],after=n(item.stock)+dir*n(item.qty);totalQty+=n(item.qty);const bad=d.type==='lend'&&after<0;if(bad)invalid++;el.classList.toggle('invalid',bad);$('.loan-after-stock',el).textContent=fmtInt(after);$('.loan-after-stock',el).className=`loan-after-stock ${bad?'danger-text':dir>0?'success-text':''}`;$('.loan-stock-hint',el).textContent=d.type==='borrow'?'保存后库存增加':'保存后库存减少';});const summary=$('#loanInventorySummary');if(!d.items.length){summary.className='notice warn';summary.innerHTML='还没有选择商品，保存前必须至少选择 1 件商品。';}else if(invalid){summary.className='notice danger';summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；有 ${invalid} 件商品库存不足，不能保存。`;}else{summary.className=`notice ${d.type==='borrow'?'success':'warn'}`;summary.innerHTML=`共选择 <strong>${d.items.length}</strong> 种、<strong>${fmtInt(totalQty)}</strong> 件；保存后库存将自动${d.type==='borrow'?'增加':'减少'}。`;}$('#saveLoan').disabled=invalid>0||!d.items.length;};
@@ -1231,10 +1249,10 @@ async function renderLoanFormModal(){
     renderImages();updateInventoryPreview();drawOutstanding();
     $('#loanForm').onsubmit=async e=>{
       e.preventDefault();sync();
-      if(!d.person){showToast('请填写调借人姓名');personInput.focus();return;}
-      if(!d.date||Number.isNaN(new Date(d.date).getTime())){showToast('请选择有效的调借时间');return;}
-      if(!d.items.length){showToast('请选择调借商品');return;}
-      if(d.items.some(i=>n(i.qty)<=0)){showToast('调借数量必须大于0');return;}
+      if(!d.person){showFieldValidation('请填写调借人姓名。',personInput);return;}
+      if(!d.date||Number.isNaN(new Date(d.date).getTime())){showFieldValidation('请选择有效的调借时间。',$('#loanDate'));return;}
+      if(!d.items.length){showFieldValidation('还没有选择调借商品，请先选择至少 1 件。',$('#loanChooseProducts'));return;}
+      if(d.items.some(i=>n(i.qty)<=0)){const bad=[...$$('.loan-qty')].find(x=>n(x.value)<=0);showFieldValidation('调借数量必须大于 0。',bad||$('#loanChooseProducts'));return;}
       const btn=$('#saveLoan');if(btn?.dataset.submitting==='1')return;
       setCoreButtonBusy(btn,true,'正在保存调借…','保存调借单并同步库存');
       try{
@@ -1447,7 +1465,7 @@ async function renderPassDealNew(){
   const people=[...new Set([...customers.map(c=>c.name),...loans.map(l=>l.person)].map(x=>String(x||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
   $('#main').innerHTML=`
     <div class="notice warn"><strong>正式功能 · 已加入保护区</strong><br>不会进入商品库、不会扣减库存、不会写库存流水，也不会混入普通商品销售排行。保存时使用按钮锁 + 固定业务ID，异常重试不会重复生成过手单。</div>
-    <form id="passDealForm" autocomplete="off">
+    <form id="passDealForm" class="action-form-clearance" autocomplete="off">
       <div class="form-group"><label class="form-label">货品描述 *</label><input id="passDealItem" class="input" value="${esc(d.itemName)}" placeholder="如：碧玉手镯 56圈" required></div>
       <div class="form-row"><div class="form-group"><label class="form-label">数量</label><input id="passDealQty" class="input" type="number" min="0.01" step="0.01" value="${esc(d.qty||1)}"></div><div class="form-group"><label class="form-label">成交时间</label><input id="passDealDate" class="input" type="datetime-local" value="${esc(d.createdAt||localInputDateTime())}"></div></div>
       <div class="form-row"><div class="form-group autocomplete"><label class="form-label">货主 / 来源 *</label><input id="passDealSource" class="input" value="${esc(d.sourceName)}" placeholder="同行姓名" required><div id="passDealSourceSuggest" class="autocomplete-list hidden"></div></div><div class="form-group autocomplete"><label class="form-label">卖给谁 *</label><input id="passDealBuyer" class="input" value="${esc(d.buyerName)}" placeholder="同行 / 客户" required><div id="passDealBuyerSuggest" class="autocomplete-list hidden"></div></div></div>
@@ -1474,9 +1492,16 @@ async function renderPassDealNew(){
 async function savePassDeal(btn){
   return withCoreActionLock('pass-deal-save',btn,'正在记录…',async()=>{
     const d=syncPassDealFormToDraft()||passDealNewDraft();
-    if(!d.itemName||!d.sourceName||!d.buyerName)throw new Error('请填写货品、货主和买家');
+    clearFieldValidation();
+    if(!d.itemName)return showFieldValidation('请填写货品描述。',$('#passDealItem'));
+    if(!d.sourceName)return showFieldValidation('请填写货主 / 来源。',$('#passDealSource'));
+    if(!d.buyerName)return showFieldValidation('请填写买家 / 客户。',$('#passDealBuyer'));
+    if(d.costAmount==='')return showFieldValidation('请填写拿货成本。',$('#passDealCost'));
+    if(d.saleAmount==='')return showFieldValidation('请填写成交价。',$('#passDealSale'));
+    if(!d.createdAt||Number.isNaN(new Date(d.createdAt).getTime()))return showFieldValidation('请选择有效的成交时间。',$('#passDealDate'));
     const cost=n(d.costAmount),sale=n(d.saleAmount);
-    if(cost<0||sale<0)throw new Error('成本和成交价不能小于0');
+    if(cost<0)return showFieldValidation('拿货成本不能小于 0。',$('#passDealCost'));
+    if(sale<0)return showFieldValidation('成交价不能小于 0。',$('#passDealSale'));
     d.__corePassDealId=d.__corePassDealId||uid('pass');
     d.__corePassDealNo=d.__corePassDealNo||await nextPassDealNo();
     saveLocalDraft(PASS_DEAL_PENDING_KEY,{...d});
@@ -2120,8 +2145,13 @@ async function reconcileLedger(productId){
 async function renderInventoryHealth(){
   setHeader('库存体检','核对商品库存和库存流水');
   const result=await calculateInventoryHealth();
-  $('#main').innerHTML=`<div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${result.rows.length}</div></div><div class="metric compact"><div class="label">异常商品</div><div class="value ${result.issues.length?'danger-text':'success-text'}">${result.issues.length}</div></div><div class="metric compact"><div class="label">孤立流水</div><div class="value ${result.orphanMoves.length?'danger-text':''}">${result.orphanMoves.length}</div></div></div><div class="notice ${result.issues.length?'warn':'success'}" style="margin-top:12px">${result.issues.length?'发现差异时先核对实物库存。若商品页库存正确，可用“补齐流水”；若实物数量不同，应去库存盘点。':'全部商品的当前库存与库存流水一致。'}</div><div class="section-title">检查结果</div><div class="list">${result.issues.length?result.issues.map(r=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(r.product.name)}</div><div class="item-meta">商品库存 ${fmtInt(r.current)} · 流水推算 ${fmtInt(r.expected)} · 差异 ${r.difference>=0?'+':''}${fmtInt(r.difference)}${r.chainBroken?' · 流水前后值存在断点':''}</div></div><button class="btn secondary small reconcile-ledger" data-id="${r.product.id}">补齐流水</button></div>`).join(''):emptyState('✓','库存流水一致')}</div>${result.orphanMoves.length?`<div class="section-title danger-text">孤立流水</div><div class="notice danger">有 ${result.orphanMoves.length} 条流水找不到对应商品。请先导出完整备份，再联系维护人员处理，不建议直接删除。</div>`:''}`;
+  const deep=window.MocuiCoreSafety?await window.MocuiCoreSafety.scan():null;
+  const deepIssues=deep?.issues?.length||0,deepWarnings=deep?.warnings?.length||0;
+  const deepCard=deep?`<div class="card v41-safety-card"><div class="card-title">v4.1 业务一致性检查</div><div class="v41-safety-status ${deepIssues?'bad':deepWarnings?'warn':'ok'}">${deepIssues?`发现 ${deepIssues} 项需要处理的问题。`:deepWarnings?`正式账本未发现硬错误；有 ${deepWarnings} 项需要留意。`:'正式账本、销售引用、调借数量和库存流水检查通过。'}</div><div class="v41-safety-grid"><div class="v41-safety-stat"><span>销售单</span><strong>${deep.counts.sales||0}</strong></div><div class="v41-safety-stat"><span>调借单</span><strong>${deep.counts.loans||0}</strong></div><div class="v41-safety-stat"><span>库存流水</span><strong>${deep.counts.stockMoves||0}</strong></div></div><div class="v41-safety-detail">${[...(deep.issues||[]),...(deep.warnings||[])].slice(0,8).map(x=>`<div>• ${esc(x.text)}</div>`).join('')||'<div>未发现需要人工确认的异常。</div>'}</div><div class="v41-safety-actions"><button id="v41Rescan" class="btn secondary">重新检查</button><button id="v41RepairCaches" class="btn secondary">重建可恢复缓存</button></div></div>`:'';
+  $('#main').innerHTML=deepCard+`<div class="grid-3"><div class="metric compact"><div class="label">商品</div><div class="value">${result.rows.length}</div></div><div class="metric compact"><div class="label">异常商品</div><div class="value ${result.issues.length?'danger-text':'success-text'}">${result.issues.length}</div></div><div class="metric compact"><div class="label">孤立流水</div><div class="value ${result.orphanMoves.length?'danger-text':''}">${result.orphanMoves.length}</div></div></div><div class="notice ${result.issues.length?'warn':'success'}" style="margin-top:12px">${result.issues.length?'发现差异时先核对实物库存。若商品页库存正确，可用“补齐流水”；若实物数量不同，应去库存盘点。':'全部商品的当前库存与库存流水一致。'}</div><div class="section-title">检查结果</div><div class="list">${result.issues.length?result.issues.map(r=>`<div class="list-item"><div class="item-main"><div class="item-title">${esc(r.product.name)}</div><div class="item-meta">商品库存 ${fmtInt(r.current)} · 流水推算 ${fmtInt(r.expected)} · 差异 ${r.difference>=0?'+':''}${fmtInt(r.difference)}${r.chainBroken?' · 流水前后值存在断点':''}</div></div><button class="btn secondary small reconcile-ledger" data-id="${r.product.id}">补齐流水</button></div>`).join(''):emptyState('✓','库存流水一致')}</div>${result.orphanMoves.length?`<div class="section-title danger-text">孤立流水</div><div class="notice danger">有 ${result.orphanMoves.length} 条流水找不到对应商品。请先导出完整备份，再联系维护人员处理，不建议直接删除。</div>`:''}`;
   $$('.reconcile-ledger').forEach(btn=>btn.onclick=async()=>{if(!await confirmDialog('确认当前商品库存数字是正确的，并仅补一条校正流水？'))return;await reconcileLedger(btn.dataset.id);showToast('校正流水已补齐');renderInventoryHealth();});
+  if($('#v41Rescan'))$('#v41Rescan').onclick=async()=>{showToast('正在重新检查…');await window.MocuiCoreSafety.scan();renderInventoryHealth();};
+  if($('#v41RepairCaches'))$('#v41RepairCaches').onclick=async()=>{const done=await window.MocuiCoreSafety.repairCaches();showToast(done.length?`已重建：${done.join('、')}`:'当前缓存无需重建');renderInventoryHealth();};
 }
 
 async function renderSettings(){

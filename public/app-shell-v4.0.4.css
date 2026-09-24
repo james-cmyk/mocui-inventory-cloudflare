@@ -84,3 +84,18 @@
   html.ios-keyboard-open body #app,body.keyboard-open #app{height:100dvh!important;min-height:100dvh!important;max-height:100dvh!important}
   html.ios-keyboard-open body #app>#main.main,body.keyboard-open #app>#main.main{padding-bottom:0!important;scroll-padding-bottom:12px!important}
 }
+
+/* v4.0.5 — Form safety + action clearance; bottom dock geometry remains frozen. */
+@media (max-width:759px){
+  /* Forms with final submit buttons must be able to scroll completely above the floating dock. */
+  #main .action-form-clearance{padding-bottom:calc(var(--mocui-dock-h,72px) + var(--mocui-dock-bottom,10px) + 34px)!important;}
+  #passDealForm #savePassDealBtn{margin-top:14px!important;}
+
+  /* Clear, persistent validation feedback instead of a silent/failed-looking tap. */
+  .form-validation-notice{position:sticky;top:8px;z-index:80;margin:0 0 12px;padding:12px 14px;border:1px solid rgba(217,45,32,.22);border-radius:14px;background:rgba(255,244,242,.96);color:#b42318;font-size:14px;font-weight:700;box-shadow:0 8px 24px rgba(16,24,40,.08);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  .field-invalid{border-color:#d92d20!important;box-shadow:0 0 0 3px rgba(217,45,32,.10)!important;}
+
+  /* Full-screen modal back control: compact iOS pill, not a large text block. */
+  .modal.full .modal-close.text-close{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:3px!important;width:auto!important;min-width:72px!important;height:42px!important;min-height:42px!important;padding:0 14px!important;border:1px solid rgba(208,213,221,.9)!important;border-radius:15px!important;background:rgba(255,255,255,.90)!important;color:#344054!important;font-size:15px!important;font-weight:700!important;line-height:1!important;box-shadow:0 3px 12px rgba(16,24,40,.06)!important;}
+  .modal.full .modal-close.text-close::before{content:'‹';font-size:25px;font-weight:500;line-height:1;margin-top:-2px;color:#667085;}
+}
