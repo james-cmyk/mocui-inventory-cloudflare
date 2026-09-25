@@ -32,7 +32,7 @@
   }
   function quoteIsOpen(q){return (q?.status||'open')==='open';}
   function quoteFollowupDue(q){return quoteIsOpen(q)&&q?.nextFollowupDate&&q.nextFollowupDate<=todayKey();}
-  function saleReceivable(s){return Math.max(0,n(s?.finalAmount)-n(s?.received));}
+  function saleReceivable(s){if(typeof saleIsHistorical==='function'&&saleIsHistorical(s))return 0;return Math.max(0,n(s?.finalAmount)-n(s?.received));}
   function activeSale(s){return typeof saleIsReportActive==='function'?saleIsReportActive(s):s?.status!=='cancelled';}
 
   async function workflow42EnhanceDashboard(){

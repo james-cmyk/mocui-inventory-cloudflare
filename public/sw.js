@@ -1,7 +1,7 @@
-const CACHE='mocui-v4.2.0-daily-efficiency';
+const CACHE='mocui-v4.2.2-quick-capture-search';
 const CORE=['./','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1','./ui-shell-stable.css','./ui-shell-framework-v4.10.css?v=4.0.2','./ui-shell-framework-v4.10.js?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app-core-v4.1.4.js?v=4.1.4','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=4.0.0','./large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
   './core-safety-v4.1.js?v=4.1.4','./core-safety-v4.1.css?v=4.1.4',
-  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0'
+  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0','./counterparty-efficiency-v4.2.1.js?v=4.2.1','./counterparty-efficiency-v4.2.1.css?v=4.2.1','./quick-capture-v4.2.2.js?v=4.2.2','./quick-capture-v4.2.2.css?v=4.2.2'
 ];
 
 self.addEventListener('install',event=>{
@@ -50,3 +50,7 @@ self.addEventListener('fetch',event=>{
 });
 
 // v4.2.0：日常业务效率优化第一轮。新增今日工作台、商品报价/跟进、商品详情统一“报价→调出→成交→内容”动作入口；不升级 IndexedDB schema，不迁移现有业务数据。
+
+// v4.2.1：调货与同行管理效率优化。复用 customers 路由作为往来总览，聚合正式销售、调借、外部货、过手差价和报价；仅展示聚合与联系人资料，不迁移业务数据库。
+
+// v4.2.2：快速建档与找货效率优化。新增“拍照 + 一句话”商品草稿、可选网页语音识别、全局货品搜索；复用原商品保存核心，不升级 IndexedDB schema，不迁移业务数据。
