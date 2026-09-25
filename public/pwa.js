@@ -1,22 +1,51 @@
 'use strict';
-(() => {
-  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isStandalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
-  let deferredPrompt=null,registration=null,checking=false;
+(()=>{
+  const CURRENT='4.4.0';
+  const VERSION_URL='./version.json';
+  let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
-  function notify(msg){const t=qs('#toast');if(t){t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),2200);}}
-  function createInstallCard(){if(isStandalone||sessionStorage.getItem('mocui_pwa_install_dismissed')==='1')return;const card=document.createElement('div');card.id='pwaInstallCard';card.className='pwa-install-card';card.innerHTML=`<div class="pwa-install-icon"><img src="icon-192.png" alt=""></div><div class="pwa-install-copy"><strong>安装“漠翠进销存”</strong><span>添加到 iPhone 主屏幕，全屏打开，使用更像 App。</span></div><button class="pwa-install-action" type="button">安装</button><button class="pwa-install-close" type="button" aria-label="关闭">×</button>`;document.body.appendChild(card);card.querySelector('.pwa-install-close').onclick=()=>{sessionStorage.setItem('mocui_pwa_install_dismissed','1');card.remove();};card.querySelector('.pwa-install-action').onclick=async()=>{if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice.catch(()=>null);deferredPrompt=null;card.remove();return;}showIOSGuide();};}
-  function showIOSGuide(){const old=qs('#pwaGuide');if(old)old.remove();const guide=document.createElement('div');guide.id='pwaGuide';guide.className='pwa-guide-backdrop';guide.innerHTML=`<div class="pwa-guide-sheet"><div class="pwa-guide-handle"></div><h2>添加到 iPhone 主屏幕</h2><ol><li>请用 <strong>Safari</strong> 打开当前网址。</li><li>点击浏览器底部的 <strong>分享按钮</strong> <span class="pwa-share-symbol">□↑</span>。</li><li>向下滑，选择 <strong>“添加到主屏幕”</strong>。</li><li>点击右上角 <strong>“添加”</strong>。</li></ol><div class="pwa-guide-note">以后直接点击桌面的“漠翠进销存”图标。</div><button type="button">我知道了</button></div>`;document.body.appendChild(guide);guide.onclick=e=>{if(e.target===guide||e.target.tagName==='BUTTON')guide.remove();};}
-  function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可安全保存，联网后自动同步';document.body.appendChild(bar);}}else if(bar){bar.textContent='网络已恢复，正在连接云端…';setTimeout(()=>bar.remove(),1800);}}
-  function showUpdate(worker){if(!worker||qs('#pwaUpdateBar'))return;const bar=document.createElement('div');bar.id='pwaUpdateBar';bar.className='pwa-update-bar';bar.innerHTML='<span>发现新版本</span><button type="button">立即更新</button>';document.body.appendChild(bar);bar.querySelector('button').onclick=()=>{sessionStorage.removeItem('mocui_pwa_reloaded');worker.postMessage({type:'SKIP_WAITING'});notify('正在更新应用…');};}
-  async function checkForUpdate({silent=false}={}){if(!('serviceWorker'in navigator)||!navigator.onLine||checking)return;checking=true;try{registration=registration||await navigator.serviceWorker.getRegistration('./')||await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});if(registration.waiting){showUpdate(registration.waiting);if(!silent)notify('发现已下载的新版本');return;}await registration.update();await new Promise(r=>setTimeout(r,1200));if(registration.waiting){showUpdate(registration.waiting);if(!silent)notify('发现新版本，可以立即更新');}else if(!silent)notify('当前已经是最新版本');}catch(e){if(!silent)notify('检查更新失败，请稍后重试');}finally{checking=false;}}
-  async function repairAppCache(){if(!navigator.onLine){notify('当前离线，不能刷新应用缓存');return;}if(!window.confirm('只刷新应用代码缓存，不会删除商品、销售、调借、本机数据库或待同步队列。确定继续吗？'))return;try{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('mocui-')).map(k=>caches.delete(k)));registration=registration||await navigator.serviceWorker.getRegistration('./');await registration?.update().catch(()=>{});if(registration?.waiting){sessionStorage.removeItem('mocui_pwa_reloaded');registration.waiting.postMessage({type:'SKIP_WAITING'});}notify('缓存已刷新，正在重新加载…');setTimeout(()=>location.reload(),800);}catch(e){notify('缓存修复失败，请稍后重试');}}
-  async function registerSW(){if(!('serviceWorker'in navigator))return;try{registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});if(registration.waiting)showUpdate(registration.waiting);registration.addEventListener('updatefound',()=>{const w=registration.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)showUpdate(w);});});navigator.serviceWorker.addEventListener('controllerchange',()=>{if(!sessionStorage.getItem('mocui_pwa_reloaded')){sessionStorage.setItem('mocui_pwa_reloaded','1');location.reload();}});setTimeout(()=>void checkForUpdate({silent:true}),800);setInterval(()=>registration?.update().catch(()=>{}),60*60*1000);}catch(e){console.warn('PWA service worker registration failed',e);}}
-  function injectUpdateCard(){if(typeof appState==='undefined'||appState.route!=='more'||qs('#mocuiUpdateMaintenanceCard'))return;const main=qs('#main');if(!main)return;const card=document.createElement('section');card.id='mocuiUpdateMaintenanceCard';card.className='mocui-maintenance-card';card.innerHTML=`<div class="mocui-maintenance-head"><div><strong>应用与更新</strong><span>错过更新提示也可以从这里恢复</span></div></div><div class="mocui-pwa-actions"><button id="mocuiCheckUpdate" type="button">检查更新</button><button id="mocuiRepairCache" type="button">刷新应用缓存</button></div><div class="mocui-maintenance-note">只清应用代码缓存，不清业务 IndexedDB 和待同步 Outbox。</div>`;main.appendChild(card);qs('#mocuiCheckUpdate').onclick=()=>checkForUpdate();qs('#mocuiRepairCache').onclick=()=>repairAppCache();}
-  const ob=new MutationObserver(()=>setTimeout(injectUpdateCard,0));
-  window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;createInstallCard();});
-  window.addEventListener('appinstalled',()=>qs('#pwaInstallCard')?.remove());
-  window.addEventListener('online',updateOnlineState);window.addEventListener('offline',updateOnlineState);
-  window.MocuiPWA={showInstallGuide:showIOSGuide,isStandalone,checkForUpdate,repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();registerSW();if(isIOS)setTimeout(createInstallCard,1800);const main=qs('#main');if(main)ob.observe(main,{childList:true});setTimeout(injectUpdateCard,1000);});
+  function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
+  function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
+  async function remoteVersion(){try{const r=await fetch(`${VERSION_URL}?t=${Date.now()}`,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return String(j.version||'');}catch{return '';}}
+  async function activateWaiting(){if(registration?.waiting){registration.waiting.postMessage({type:'SKIP_WAITING'});return true;}return false;}
+  async function checkForUpdate({force=false}={}){
+    if(!('serviceWorker'in navigator)||!navigator.onLine||checking)return false;
+    const now=Date.now();if(!force&&now-lastCheck<45000)return false;lastCheck=now;checking=true;
+    try{
+      registration=registration||await navigator.serviceWorker.getRegistration('./')||await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+      const rv=await remoteVersion();
+      if(rv&&rv!==CURRENT){sessionStorage.setItem('mocui_update_target',rv);await registration.update();await new Promise(r=>setTimeout(r,350));await activateWaiting();return true;}
+      await registration.update();await new Promise(r=>setTimeout(r,250));await activateWaiting();return false;
+    }catch(e){console.warn('[v4.4 update]',e);return false;}finally{checking=false;}
+  }
+  async function repairAppCache(){
+    if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
+    try{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('mocui-')).map(k=>caches.delete(k)));registration=registration||await navigator.serviceWorker.getRegistration('./');await registration?.update();await activateWaiting();setTimeout(()=>location.reload(),350);}catch(e){notify('刷新失败，请稍后再试');}
+  }
+  async function registerSW(){
+    if(!('serviceWorker'in navigator))return;
+    try{
+      registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        const key=`mocui_controller_reload_${sessionStorage.getItem('mocui_update_target')||CURRENT}`;
+        if(sessionStorage.getItem(key)==='1')return;
+        sessionStorage.setItem(key,'1');
+        location.reload();
+      });
+      registration.addEventListener('updatefound',()=>{const w=registration.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller){sessionStorage.setItem('mocui_update_target',(sessionStorage.getItem('mocui_update_target')||CURRENT));w.postMessage({type:'SKIP_WAITING'});}});});
+      if(registration.waiting)await activateWaiting();
+      setTimeout(()=>checkForUpdate({force:true}),500);
+    }catch(e){console.warn('PWA service worker registration failed',e);}
+  }
+  function announceVersion(){
+    const old=localStorage.getItem('mocui_last_ui_version');
+    localStorage.setItem('mocui_last_ui_version',CURRENT);
+    if(old&&old!==CURRENT)setTimeout(()=>notify(`已更新到 v${CURRENT}`),500);
+  }
+  window.addEventListener('online',()=>{updateOnlineState();checkForUpdate({force:true});});
+  window.addEventListener('offline',updateOnlineState);
+  window.addEventListener('pageshow',()=>checkForUpdate());
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
+  window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();});
 })();
