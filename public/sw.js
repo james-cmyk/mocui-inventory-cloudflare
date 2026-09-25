@@ -1,7 +1,7 @@
-const CACHE='mocui-v4.2.4-daily-close-review';
+const CACHE='mocui-v4.2.6-action-center';
 const CORE=['./','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1','./ui-shell-stable.css','./ui-shell-framework-v4.10.css?v=4.0.2','./ui-shell-framework-v4.10.js?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app-core-v4.1.4.js?v=4.1.4','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=4.0.0','./large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
   './core-safety-v4.1.js?v=4.1.4','./core-safety-v4.1.css?v=4.1.4',
-  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0','./counterparty-efficiency-v4.2.1.js?v=4.2.1','./counterparty-efficiency-v4.2.1.css?v=4.2.1','./quick-capture-v4.2.2.js?v=4.2.2','./quick-capture-v4.2.2.css?v=4.2.2','./settlement-center-v4.2.3.js?v=4.2.3','./settlement-center-v4.2.3.css?v=4.2.3','./daily-close-v4.2.4.js?v=4.2.4','./daily-close-v4.2.4.css?v=4.2.4'
+  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0','./counterparty-efficiency-v4.2.1.js?v=4.2.1','./counterparty-efficiency-v4.2.1.css?v=4.2.1','./quick-capture-v4.2.2.js?v=4.2.2','./quick-capture-v4.2.2.css?v=4.2.2','./settlement-center-v4.2.3.js?v=4.2.3','./settlement-center-v4.2.3.css?v=4.2.3','./daily-close-v4.2.4.js?v=4.2.4','./daily-close-v4.2.4.css?v=4.2.4','./weekly-review-v4.2.5.js?v=4.2.5','./weekly-review-v4.2.5.css?v=4.2.5','./action-center-v4.2.6.js?v=4.2.6','./action-center-v4.2.6.css?v=4.2.6'
 ];
 
 self.addEventListener('install',event=>{
@@ -58,3 +58,7 @@ self.addEventListener('fetch',event=>{
 // v4.2.3：成交、收款、付款与对账效率优化。正式销售、过手差价、外部同行货统一展示待收待付；支持分次补收/补付、结算留痕、按人对账；不修改库存，不升级 IndexedDB schema。
 
 // v4.2.4：每日收尾与经营复盘。区分成交口径与现金口径，汇总调借、外部货、报价跟进和待结事项；保存日结核对快照，不改变原业务账和库存。
+
+// v4.2.5：周复盘与异常经营提醒。近7天对比前7天，提醒账龄、长时间调出、慢动库存、毛利率变化和同行在外货值集中度；不修改原始业务账。
+
+// v4.2.6：行动中心与提醒降噪。把待收待付、到期/超期调货、报价跟进、资料缺失和慢动库存转为可执行任务；支持今天已处理、3天/7天后提醒；不修改原业务账。
