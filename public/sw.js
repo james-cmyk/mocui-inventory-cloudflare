@@ -1,7 +1,7 @@
-const CACHE='mocui-v4.3.0-formal-release';
+const CACHE='mocui-v4.3.1-startup-fix';
 const CORE=['./','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1','./ui-shell-stable.css','./ui-shell-framework-v4.10.css?v=4.0.2','./ui-shell-framework-v4.10.js?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./cloud.js','./qinsilk-import.js','./content-workbench.js','./share.css','./share.js','./app-core-v4.1.4.js?v=4.1.4','./sales-cost-v3.js?v=3.13.0','./product-fast-index-v3.1.js?v=4.0.0','./large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0','./analytics-dashboard-v3.15.js?v=3.17.0','./analytics-reports-v3.16.js?v=3.16.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0','./ui-shell-guard.js','./pwa.js','./manifest.webmanifest','./icon-180.png','./icon-192.png','./icon-512.png',
   './core-safety-v4.1.js?v=4.1.4','./core-safety-v4.1.css?v=4.1.4',
-  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0','./counterparty-efficiency-v4.2.1.js?v=4.2.1','./counterparty-efficiency-v4.2.1.css?v=4.2.1','./quick-capture-v4.2.2.js?v=4.2.2','./quick-capture-v4.2.2.css?v=4.2.2','./settlement-center-v4.2.3.js?v=4.2.3','./settlement-center-v4.2.3.css?v=4.2.3','./daily-close-v4.2.4.js?v=4.2.4','./daily-close-v4.2.4.css?v=4.2.4','./weekly-review-v4.2.5.js?v=4.2.5','./weekly-review-v4.2.5.css?v=4.2.5','./capital-allocation-v4.2.6.js?v=4.2.6','./capital-allocation-v4.2.6.css?v=4.2.6','./content-linkage-v4.2.7.js?v=4.2.7','./content-linkage-v4.2.7.css?v=4.2.7','./formal-release-v4.3.0.js?v=4.3.0','./formal-release-v4.3.0.css?v=4.3.0'
+  './workflow-efficiency-v4.2.js?v=4.2.0','./workflow-efficiency-v4.2.css?v=4.2.0','./counterparty-efficiency-v4.2.1.js?v=4.2.1','./counterparty-efficiency-v4.2.1.css?v=4.2.1','./quick-capture-v4.2.2.js?v=4.2.2','./quick-capture-v4.2.2.css?v=4.2.2','./settlement-center-v4.2.3.js?v=4.2.3','./settlement-center-v4.2.3.css?v=4.2.3','./daily-close-v4.2.4.js?v=4.2.4','./daily-close-v4.2.4.css?v=4.2.4','./weekly-review-v4.2.5.js?v=4.2.5','./weekly-review-v4.2.5.css?v=4.2.5','./capital-allocation-v4.2.6.js?v=4.2.6','./capital-allocation-v4.2.6.css?v=4.2.6','./content-linkage-v4.2.7.js?v=4.2.7','./content-linkage-v4.2.7.css?v=4.2.7','./formal-release-v4.3.1.js?v=4.3.1','./formal-release-v4.3.0.css?v=4.3.0'
 ];
 
 self.addEventListener('install',event=>{
@@ -66,3 +66,7 @@ self.addEventListener('fetch',event=>{
 // v4.2.7：商品档案与内容生产联动。新增内容事实卡、朋友圈/同行/小红书/短视频草稿联动、内容资料缺口概览；内部成本/货主/内部备注不自动进入公开内容，原始素材不被修改。
 
 // v4.3.0：4.2业务效率优化正式收口。统一底部导航、合并首页经营入口、整理更多菜单、增加只读正式版自检；不迁移数据库、不修改业务账本。
+
+// v4.3.1：紧急启动修复。
+// 移除 v4.3.0 中 bottom-nav MutationObserver 自触发循环；
+// 不涉及数据库、库存、销售、调借、结算和云端业务数据。
