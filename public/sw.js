@@ -1,8 +1,8 @@
-const CACHE='mocui-v4.4.3-mobile-cleanup';
+const CACHE='mocui-v4.4.6-home-fusion';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
-  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.4.3.js?v=4.4.3',
-  './mocui-lite-v4.4.3.css?v=4.4.3','./pwa.js?v=4.4.3','./manifest.webmanifest','./version.json'
+  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.4.6.js?v=4.4.6','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
+  './mocui-lite-v4.4.6.css?v=4.4.6','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.4.6','./manifest.webmanifest','./version.json'
 ];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}}));await self.skipWaiting();})());});
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});
@@ -13,3 +13,9 @@ self.addEventListener('fetch',event=>{const req=event.request,url=new URL(req.ur
 // v4.4.2：压缩首页模块、补回今日利润、统一全站卡片/弹窗/按钮视觉；小红书订单显式渠道 + 客户信息自动识别。
 
 // v4.4.3：手机端交互收尾；业务表单/弹窗隐藏底部导航，移除旧 business-flow 重复商品往来增强，保留子分类保护。
+
+// v4.4.4：修复销售撤销/恢复循环的库存幂等缺陷；新增撤销单库存检查修复与销售客户直接修改。
+
+// v4.4.5：统一新增商品、过手单、外部同行货多图选择；再次选图只追加不覆盖，首图继续兼容旧列表。
+
+// v4.4.6：首页融合今日成交构成；顶部使用微信式独立全局搜索按钮；首页成交/利润统一为三套账合计。
