@@ -1,8 +1,8 @@
-const CACHE='mocui-v4.4.7-data-accuracy';
+const CACHE='mocui-v4.4.8-report-source-fix';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
-  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.4.7.js?v=4.4.7','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5','./data-accuracy-hotfix-v4.4.7.js?v=4.4.7',
-  './mocui-lite-v4.4.7.css?v=4.4.7','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.4.7','./manifest.webmanifest','./version.json'
+  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.4.8.js?v=4.4.8','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
+  './mocui-lite-v4.4.8.css?v=4.4.8','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.4.8','./manifest.webmanifest','./version.json'
 ];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}}));await self.skipWaiting();})());});
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});
@@ -21,3 +21,5 @@ self.addEventListener('fetch',event=>{const req=event.request,url=new URL(req.ur
 // v4.4.6：首页融合今日成交构成；顶部使用微信式独立全局搜索按钮；首页成交/利润统一为三套账合计。
 
 // v4.4.7：报表库存改用正式商品库实时数据；负应收拆分为待收/多收；新销售禁止实收超过应收。
+
+// v4.4.8：停用旧 analytics-reports 页面接管；正式报表直接读取正式销售/商品账本，销售超额实收校验并入主 UI 脚本。
