@@ -1,1 +1,5 @@
-{"version": "4.4.1", "channel": "stable", "name": "UI统一与小红书识别优化"}
+{
+  "version": "4.4.2",
+  "channel": "stable",
+  "name": "UI手机端精修版"
+}
