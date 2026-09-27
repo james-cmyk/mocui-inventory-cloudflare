@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.4.9';
+  const CURRENT='4.5.0';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -16,7 +16,7 @@
       const rv=await remoteVersion();
       if(rv&&rv!==CURRENT){sessionStorage.setItem('mocui_update_target',rv);await registration.update();await new Promise(r=>setTimeout(r,350));await activateWaiting();return true;}
       await registration.update();await new Promise(r=>setTimeout(r,250));await activateWaiting();return false;
-    }catch(e){console.warn('[v4.4 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.5 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
@@ -27,10 +27,9 @@
     try{
       registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
       navigator.serviceWorker.addEventListener('controllerchange',()=>{
-        const key=`mocui_controller_reload_${sessionStorage.getItem('mocui_update_target')||CURRENT}`;
-        if(sessionStorage.getItem(key)==='1')return;
-        sessionStorage.setItem(key,'1');
-        location.reload();
+        // v4.5.0: 后台更新只切换 Service Worker，不强制刷新当前页面。
+        // 旧页面继续稳定使用；下次重新进入自然加载新版本。
+        sessionStorage.setItem('mocui_update_ready',sessionStorage.getItem('mocui_update_target')||CURRENT);
       });
       registration.addEventListener('updatefound',()=>{const w=registration.installing;if(!w)return;w.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller){sessionStorage.setItem('mocui_update_target',(sessionStorage.getItem('mocui_update_target')||CURRENT));w.postMessage({type:'SKIP_WAITING'});}});});
       if(registration.waiting)await activateWaiting();
@@ -38,9 +37,8 @@
     }catch(e){console.warn('PWA service worker registration failed',e);}
   }
   function announceVersion(){
-    const old=localStorage.getItem('mocui_last_ui_version');
+    // 静默记录版本，不在前台弹“已更新”提示。
     localStorage.setItem('mocui_last_ui_version',CURRENT);
-    if(old&&old!==CURRENT)setTimeout(()=>notify(`已更新到 v${CURRENT}`),500);
   }
   window.addEventListener('online',()=>{updateOnlineState();checkForUpdate({force:true});});
   window.addEventListener('offline',updateOnlineState);
