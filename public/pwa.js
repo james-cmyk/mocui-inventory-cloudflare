@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.5.0';
+  const CURRENT='4.5.1';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -16,7 +16,7 @@
       const rv=await remoteVersion();
       if(rv&&rv!==CURRENT){sessionStorage.setItem('mocui_update_target',rv);await registration.update();await new Promise(r=>setTimeout(r,350));await activateWaiting();return true;}
       await registration.update();await new Promise(r=>setTimeout(r,250));await activateWaiting();return false;
-    }catch(e){console.warn('[v4.5 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.5.1 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}

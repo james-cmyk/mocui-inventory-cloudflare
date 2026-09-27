@@ -1,8 +1,8 @@
-const CACHE='mocui-v4.5.0-stability-ui';
+const CACHE='mocui-v4.5.1-product-scroll-ui';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
-  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.5.0.js?v=4.5.0','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
-  './mocui-lite-v4.5.0.css?v=4.5.0','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.5.0','./manifest.webmanifest','./version.json'
+  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.5.1.js?v=4.5.1','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
+  './mocui-lite-v4.5.1.css?v=4.5.1','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.5.1','./manifest.webmanifest','./version.json'
 ];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}}));await self.skipWaiting();})());});
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});
@@ -27,3 +27,5 @@ self.addEventListener('fetch',event=>{const req=event.request,url=new URL(req.ur
 // v4.4.9：纯 UI 统一版；仅统一视觉层、表单密度、报表层级、底部导航与弹窗，不修改业务数据逻辑。
 
 // v4.5.0：商品搜索防抖/中文输入法稳定；后台更新不再强制刷新；顶部去毛玻璃；首页单图标与紧凑布局。
+
+// v4.5.1：修复商品搜索结果出现后 iOS PWA 主滚动层失活；更多页统一为单图标紧凑卡片。
