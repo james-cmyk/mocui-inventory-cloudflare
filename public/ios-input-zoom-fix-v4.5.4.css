@@ -1,0 +1,27 @@
+/* v4.5.4 · iPhone/PWA input auto-zoom fix
+ * iOS Safari/PWA automatically zooms when the focused editable control renders below 16px.
+ * This layer loads last and only changes editable controls on mobile; labels/helper text stay unchanged.
+ */
+@media (max-width:759px){
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select,
+  [contenteditable="true"],
+  .input,
+  .select,
+  .textarea,
+  .mini-input,
+  .filter-select,
+  .search input,
+  .v44-global-search input,
+  .stocktake-row input{
+    font-size:16px!important;
+    -webkit-text-size-adjust:100%!important;
+    text-size-adjust:100%!important;
+  }
+
+  input::placeholder,
+  textarea::placeholder{
+    font-size:16px!important;
+  }
+}

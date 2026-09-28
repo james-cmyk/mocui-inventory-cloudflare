@@ -1,8 +1,8 @@
-const CACHE='mocui-v4.5.3-search-more-stable';
+const CACHE='mocui-v4.5.4-ios-input-zoom-fix';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
   './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.5.3.js?v=4.5.3','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
-  './mocui-lite-v4.5.3.css?v=4.5.3','./media-multi-v4.4.5.css?v=4.4.5','./pwa.js?v=4.5.3','./manifest.webmanifest','./version.json'
+  './mocui-lite-v4.5.3.css?v=4.5.3','./media-multi-v4.4.5.css?v=4.4.5','./ios-input-zoom-fix-v4.5.4.css?v=4.5.4','./ios-input-zoom-fix-v4.5.4.js?v=4.5.4','./pwa.js?v=4.5.4','./manifest.webmanifest','./version.json'
 ];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(CACHE);await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}}));await self.skipWaiting();})());});
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});
@@ -31,3 +31,5 @@ self.addEventListener('fetch',event=>{const req=event.request,url=new URL(req.ur
 // v4.5.1：修复商品搜索结果出现后 iOS PWA 主滚动层失活；更多页统一为单图标紧凑卡片。
 
 // v4.5.3：全局找货仅保留首页裸放大镜；商品/调借移除全局搜索；更多页使用静态单图标稳定布局。
+
+// v4.5.4：修复 iPhone/PWA 输入框聚焦自动放大及返回后缩放状态残留；所有移动端可编辑控件统一 >=16px。
