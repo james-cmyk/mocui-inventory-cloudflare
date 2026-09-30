@@ -1,8 +1,8 @@
-const CACHE='mocui-v4.5.7-emergency-stable';
+const CACHE='mocui-v4.5.8-picker-image-fix';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
-  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.5.3.js?v=4.5.7','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
-  './mocui-lite-v4.5.3.css?v=4.5.3','./media-multi-v4.4.5.css?v=4.4.5','./ios-input-zoom-fix-v4.5.4.css?v=4.5.4','./ios-input-zoom-fix-v4.5.4.js?v=4.5.4','./trade-picker-v4.5.5.css?v=4.5.5','./trade-picker-v4.5.5.js?v=4.5.5','./pwa.js?v=4.5.7','./manifest.webmanifest','./version.json'
+  './app-core-v4.1.4.js?v=4.1.4','./mocui-lite-v4.5.3.js?v=4.5.8','./sales-stock-hotfix-v4.4.4.js?v=4.4.4','./media-multi-v4.4.5.js?v=4.4.5',
+  './mocui-lite-v4.5.3.css?v=4.5.3','./media-multi-v4.4.5.css?v=4.4.5','./ios-input-zoom-fix-v4.5.4.css?v=4.5.4','./ios-input-zoom-fix-v4.5.4.js?v=4.5.4','./trade-picker-v4.5.8.css?v=4.5.8','./trade-picker-v4.5.8.js?v=4.5.8','./pwa.js?v=4.5.8','./manifest.webmanifest','./version.json'
 ];
 self.addEventListener('install',event=>{
   event.waitUntil((async()=>{

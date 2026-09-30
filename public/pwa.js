@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.5.7';
+  const CURRENT='4.5.8';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -21,7 +21,7 @@
       }
       await registration.update();
       return false;
-    }catch(e){console.warn('[v4.5.7 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.5.8 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     // 仅供用户明确点击“修复缓存”时调用；这是主动操作，因此允许刷新。

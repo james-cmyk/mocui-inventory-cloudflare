@@ -1,7 +1,7 @@
 'use strict';
 
 (function(){
-  const VERSION='4.5.7';
+  const VERSION='4.5.8';
   const XHS_DEFAULT_DAYS=15;
   const base={
     renderProducts,renderLoans,renderMore,renderPassDealNew,renderSaleNew,renderSales,

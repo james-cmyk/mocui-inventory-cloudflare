@@ -1,0 +1,89 @@
+/* 漠翠进销存 v4.5.8 — 选货框与商品图片兼容 UI */
+body.v455-picker-open{overflow:hidden!important;}
+body.v455-picker-open .bottom-nav{visibility:hidden!important;pointer-events:none!important;}
+.v455-picker-overlay{
+  position:fixed;inset:0;z-index:12000;background:#f5f7f6;
+  display:flex;align-items:stretch;justify-content:center;
+  padding:0;margin:0;box-sizing:border-box;
+}
+.v455-picker-sheet{
+  width:100%;max-width:760px;height:100dvh;min-height:100dvh;background:#f5f7f6;
+  display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;
+  padding-top:env(safe-area-inset-top);
+}
+.v455-picker-head{
+  flex:0 0 auto;min-height:64px;padding:10px 14px 9px 16px;background:#fff;
+  border-bottom:1px solid #e6ebe8;display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.v455-picker-head>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.v455-picker-head strong{font-size:18px;line-height:1.25;color:#16231e}
+.v455-picker-head small{font-size:11px;color:#75817b}
+.v455-picker-close{
+  appearance:none;width:42px;height:42px;min-width:42px;border:1px solid #e0e6e3;border-radius:50%;
+  background:#fff;color:#53615a;font-size:27px;line-height:1;display:grid;place-items:center;padding:0;
+}
+.v455-picker-searchbar{
+  flex:0 0 auto;position:relative;margin:10px 12px 8px;padding:0 104px 0 42px;height:48px;
+  border:1px solid #dfe5e2;border-radius:15px;background:#fff;display:flex;align-items:center;
+}
+.v455-picker-searchbar input{
+  width:100%;height:46px;min-height:46px;border:0!important;outline:0!important;box-shadow:none!important;
+  background:transparent!important;font-size:16px!important;color:#16231e;padding:0!important;margin:0!important;
+}
+.v455-search-icon{position:absolute;left:16px;top:50%;width:15px;height:15px;border:2px solid #67766f;border-radius:50%;transform:translateY(-55%)}
+.v455-search-icon:after{content:'';position:absolute;width:7px;height:2px;background:#67766f;border-radius:2px;right:-5px;bottom:-2px;transform:rotate(45deg);transform-origin:left center}
+.v455-picker-summary{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:11px;color:#75817b;white-space:nowrap}
+.v455-picker-list{
+  flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+  overscroll-behavior-y:contain;padding:0 12px 12px;display:flex;flex-direction:column;gap:8px;
+}
+.v455-picker-row{
+  border:1px solid #e3e9e6;border-radius:17px;background:#fff;padding:10px;
+  display:grid;grid-template-columns:28px 52px minmax(0,1fr);gap:9px;align-items:center;
+  box-shadow:none;touch-action:pan-y;
+}
+.v455-picker-row.is-selected{border-color:#a9d8c4;background:#fbfffd;}
+.v455-picker-row.is-disabled{opacity:.52;}
+.v455-picker-check{
+  all:unset!important;box-sizing:border-box!important;position:relative!important;
+  width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;max-width:28px!important;max-height:28px!important;
+  border:1.5px solid #cfd8d3!important;border-radius:8px!important;background:#fff!important;
+  display:grid!important;place-items:center!important;padding:0!important;margin:0!important;
+  color:#fff!important;line-height:1!important;cursor:pointer!important;overflow:hidden!important;
+}
+.v455-picker-check>*,.v455-picker-check img,.v455-picker-check svg{display:none!important;}
+.v455-picker-check::after{content:'';display:block;font-size:17px;font-weight:900;line-height:1;color:#fff;}
+.v455-picker-row.is-selected .v455-picker-check{background:#176b50!important;border-color:#176b50!important;}
+.v455-picker-row.is-selected .v455-picker-check::after{content:'✓';}
+.v455-picker-check:disabled{cursor:default!important;background:#f4f6f5!important;border-color:#dde3e0!important;}
+.v455-picker-thumb{width:52px!important;height:52px!important;min-width:52px!important;min-height:52px!important;border-radius:12px;object-fit:cover;background:#edf3f0;display:block;overflow:hidden;}
+.v455-picker-placeholder{display:grid!important;place-items:center!important;color:#7a8881;font-weight:800;font-size:12px;background:#eef2f0!important;}
+.v455-picker-copy{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.v455-picker-copy strong{font-size:14px;line-height:1.25;color:#16231e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.v455-picker-copy small{font-size:10.5px;line-height:1.35;color:#75817b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.v455-picker-copy>span{font-size:11px;color:#52615a;}
+.v455-picker-qty{
+  grid-column:2 / 4;border-top:1px solid #eef1ef;margin-top:2px;padding-top:8px;
+  display:grid;grid-template-columns:auto minmax(138px,180px) auto;align-items:center;gap:8px;
+}
+.v455-picker-qty.is-hidden{display:none;}
+.v455-picker-qty>span{font-size:12px;color:#53615a;font-weight:700;}
+.v455-picker-qty>small{font-size:10px;color:#87928d;text-align:right;white-space:nowrap;}
+.v455-qty-control{height:40px;border:1px solid #dfe5e2;border-radius:12px;background:#fff;display:grid;grid-template-columns:38px 1fr 38px;overflow:hidden;}
+.v455-qty-control button{border:0;background:#f8faf9;color:#405048;font-size:19px;padding:0;min-width:0;}
+.v455-qty-control input{border:0!important;border-left:1px solid #edf0ee!important;border-right:1px solid #edf0ee!important;border-radius:0!important;text-align:center;min-width:0;width:100%;font-size:16px!important;box-shadow:none!important;outline:0!important;background:#fff!important;}
+.v455-picker-footer{
+  flex:0 0 auto;padding:9px 12px calc(9px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #e3e9e6;
+  display:grid;grid-template-columns:110px 1fr;gap:8px;
+}
+.v455-picker-footer .btn{min-height:46px!important;margin:0!important;}
+.v455-picker-empty{margin:auto;padding:44px 18px;text-align:center;color:#78857f;display:flex;flex-direction:column;gap:6px;}
+.v455-picker-empty strong{font-size:15px;color:#52615a}.v455-picker-empty span{font-size:11px}
+.v455-save-draft{margin-top:8px!important;}
+.v455-loan-sticky-actions{display:grid!important;grid-template-columns:112px minmax(0,1fr)!important;gap:8px!important;align-items:center!important;}
+.v455-loan-sticky-actions .btn{width:100%!important;margin:0!important;}
+@media(max-width:390px){
+  .v455-picker-head{padding-left:13px;padding-right:10px}.v455-picker-searchbar{margin-left:9px;margin-right:9px}.v455-picker-list{padding-left:9px;padding-right:9px}
+  .v455-picker-row{grid-template-columns:26px 48px minmax(0,1fr);padding:9px 8px;gap:8px}.v455-picker-thumb{width:48px;height:48px}
+  .v455-picker-qty{grid-column:2 / 4;grid-template-columns:auto minmax(130px,1fr);}.v455-picker-qty>small{grid-column:1 / 3;text-align:left}.v455-picker-footer{grid-template-columns:96px 1fr}
+}
