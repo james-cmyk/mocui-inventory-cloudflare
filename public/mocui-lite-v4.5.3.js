@@ -1,7 +1,7 @@
 'use strict';
 
 (function(){
-  const VERSION='4.5.8';
+  const VERSION='4.5.9';
   const XHS_DEFAULT_DAYS=15;
   const base={
     renderProducts,renderLoans,renderMore,renderPassDealNew,renderSaleNew,renderSales,
@@ -336,6 +336,10 @@
       timer=setTimeout(()=>requestAnimationFrame(()=>{
         if(appState?.route!=='products'||!document.body.contains(input))return;
         const value=input.value;
+        // v4.5.9：只要用户主动输入关键词，就跨库存状态搜索正式商品。
+        // 原列表空搜索时仍保持“有库存”默认视图，避免首页日常浏览突然变得很长。
+        const stockFilter=$q('#stockFilter');
+        if(value.trim()&&stockFilter&&stockFilter.value!=='')stockFilter.value='';
         if(value===lastCommitted){restoreScroll();return;}
         lastCommitted=value;
         try{

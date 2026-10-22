@@ -36,11 +36,36 @@
   }
   function mediaGrid(images,{removeClass='',cover=true}={}){
     if(!images?.length)return '<div class="field-help">尚未选择图片</div>';
-    return `<div class="mocui-media-grid">${images.map((src,idx)=>`<div class="mocui-media-tile"><img src="${esc(src)}" alt="图片 ${idx+1}">${cover&&idx===0?'<span class="mocui-media-cover">首图</span>':''}${removeClass?`<button type="button" class="mocui-media-remove ${removeClass}" data-index="${idx}" aria-label="删除第${idx+1}张图片">×</button>`:''}</div>`).join('')}</div>`;
+    return `<div class="mocui-media-grid">${images.map((src,idx)=>`<div class="mocui-media-tile"><img src="${esc(src)}" alt="图片 ${idx+1}">${cover&&idx===0?'<span class="mocui-media-cover">首图</span>':''}${removeClass?`<button type="button" class="mocui-media-remove ui-icon-only ${removeClass}" data-index="${idx}" aria-label="删除第${idx+1}张图片">×</button>`:''}</div>`).join('')}</div>`;
   }
   function detailGallery(images){
     if(!images?.length)return '';
     return `<div class="mocui-detail-gallery">${images.map((src,idx)=>`<img src="${esc(src)}" alt="图片 ${idx+1}" loading="lazy">`).join('')}</div>`;
+  }
+
+  // v4.5.9：商品/过手/外部货的图片统一支持点击放大。
+  // 使用事件委托，后续新增或删除图片重新渲染后无需重复绑定。
+  function closeMediaLightbox(){
+    document.querySelector('#mocuiMediaLightbox')?.remove();
+    document.body.classList.remove('mocui-media-lightbox-open');
+  }
+  function openMediaLightbox(src,alt='商品图片'){
+    const url=String(src||'').trim();if(!url)return;
+    closeMediaLightbox();
+    const box=document.createElement('div');box.id='mocuiMediaLightbox';box.className='mocui-media-lightbox';
+    box.innerHTML=`<button type="button" class="mocui-media-lightbox-close ui-icon-only" aria-label="关闭大图">×</button><div class="mocui-media-lightbox-stage"><img src="${esc(url)}" alt="${esc(alt)}"></div>`;
+    document.body.appendChild(box);document.body.classList.add('mocui-media-lightbox-open');
+    box.querySelector('.mocui-media-lightbox-close').onclick=closeMediaLightbox;
+    box.addEventListener('click',e=>{if(e.target===box||e.target.classList.contains('mocui-media-lightbox-stage'))closeMediaLightbox();});
+  }
+  if(!window.__mocuiMediaPreviewBound){
+    window.__mocuiMediaPreviewBound=true;
+    document.addEventListener('click',e=>{
+      const img=e.target?.closest?.('.mocui-media-tile > img, .mocui-detail-gallery img');
+      if(!img)return;
+      e.preventDefault();e.stopPropagation();openMediaLightbox(img.currentSrc||img.src,img.alt||'商品图片');
+    });
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMediaLightbox();});
   }
 
   // ---------- 正式商品：单图 -> 最多12图，image继续作为兼容首图 ----------
