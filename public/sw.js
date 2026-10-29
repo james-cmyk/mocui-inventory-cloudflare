@@ -1,4 +1,4 @@
-const CACHE='mocui-v4.6.7-recent-contacts';
+const CACHE='mocui-v4.6.8-continuous';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
   './ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./ui-refine-v2.4.css?v=2.4.0',

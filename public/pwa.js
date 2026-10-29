@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.6.7';
+  const CURRENT='4.6.8';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -736,7 +736,7 @@
       home.insertBefore(sec,actions||home.lastElementChild);
       sec.querySelectorAll('[data-v466-recent]').forEach(btn=>btn.onclick=()=>{const x=supported[Number(btn.dataset.v466Recent)||0];if(!x)return;const type=String(x.entityType||''),id=String(x.entityId||'');if(type==='product'&&id)window.navigate?.('product-detail',{id});else if(type==='loan'&&id&&typeof window.openLoanDetail==='function')window.openLoanDetail(id);else if(type==='loan')window.navigate?.('loans');else if(type==='sale')window.navigate?.('sales',{highlight:id});});
     }
-    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 快捷联系人版`;
+    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 连续处理版`;
   }
   function scheduleDashboard466(){
     const run=()=>enhanceDashboard466().catch(e=>console.warn('[v4.6.6 dashboard]',e));
@@ -832,6 +832,107 @@
   }
   function waitContacts467(){let attempts=0;const tick=()=>{attempts++;if(installContacts467()||attempts>160)return;setTimeout(tick,50);};setTimeout(tick,260);}
 
+  // ===== v4.6.8 保存成功后的连续处理 =====
+  function installContinuous468Styles(){
+    if(document.getElementById('mocuiContinuous468Styles'))return;
+    const style=document.createElement('style');style.id='mocuiContinuous468Styles';
+    style.textContent=`
+      .v468-complete{position:fixed;z-index:160;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));border:1px solid #d9e6df;border-radius:20px;background:rgba(255,255,255,.98);box-shadow:0 16px 42px rgba(22,52,38,.18);padding:13px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);animation:v468-in .16s ease-out}
+      @keyframes v468-in{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+      .v468-complete-head{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:10px}.v468-complete-icon{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#e8f6ef;color:#13704f;font-size:20px;font-weight:900}
+      .v468-complete-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.v468-complete-copy strong{font-size:15px;color:#17221e}.v468-complete-copy small{font-size:10.5px;color:#75817b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v468-complete-close{appearance:none;border:0;background:transparent;width:34px;height:34px;border-radius:10px;color:#84918b;font-size:20px;box-shadow:none!important}
+      .v468-complete-actions{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:7px;margin-top:11px}.v468-complete-actions button{appearance:none;min-height:44px;border-radius:13px;border:1px solid #dfe7e3;background:#fff;color:#3e5047;font-size:12px;font-weight:800;box-shadow:none!important;padding:7px 6px}.v468-complete-actions .primary{background:#177355;border-color:#177355;color:#fff}.v468-complete-actions button:active{transform:scale(.985)}
+      body.v462-field-focused .v468-complete{display:none!important}
+      @media(max-width:380px){.v468-complete{left:8px;right:8px;padding:11px}.v468-complete-actions{grid-template-columns:1.2fr 1fr 1fr;gap:5px}.v468-complete-actions button{font-size:11px;padding:6px 4px}}
+    `;
+    document.head.appendChild(style);
+  }
+  function closeCompletion468(){document.getElementById('v468Completion')?.remove();}
+  function completionKey468(action,id){return `${action}:${id||''}`;}
+  function handledCompletion468(key){try{return sessionStorage.getItem('mocui_v468_last_completion')===key;}catch{return false;}}
+  function markCompletion468(key){try{sessionStorage.setItem('mocui_v468_last_completion',key);}catch{}}
+  async function latestAudit468(action,sinceMs){
+    if(typeof window.dbAll!=='function')return null;
+    try{
+      const logs=await window.dbAll('auditLogs');
+      return (logs||[]).filter(x=>String(x?.action||'')===action&&new Date(x?.createdAt||0).getTime()>=sinceMs).sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0))[0]||null;
+    }catch{return null;}
+  }
+  async function completionRecord468(kind,id){
+    if(!id||typeof window.dbGet!=='function')return null;
+    try{return await window.dbGet(kind==='sale'?'sales':'loans',id);}catch{return null;}
+  }
+  function showCompletion468(kind,record,audit){
+    installContinuous468Styles();closeCompletion468();
+    const id=String(record?.id||audit?.entityId||'');
+    const key=completionKey468(kind==='sale'?'sale.create':'loan.create',id);if(handledCompletion468(key))return;markCompletion468(key);
+    const isSale=kind==='sale';
+    const title=isSale?'销售已保存':'调借已保存';
+    const meta=isSale
+      ?`${record?.orderNo||''}${record?.customerName?` · ${record.customerName}`:''}${Number.isFinite(Number(record?.finalAmount))?` · ¥${Number(record.finalAmount||0).toFixed(0)}`:''}`
+      :`${record?.loanNo||''}${record?.person?` · ${record.person}`:''}${record?.type?` · ${record.type==='borrow'?'调入':'借出'}`:''}`;
+    const sheet=document.createElement('section');sheet.id='v468Completion';sheet.className='v468-complete';sheet.setAttribute('role','status');
+    sheet.innerHTML=`<div class="v468-complete-head"><span class="v468-complete-icon">✓</span><span class="v468-complete-copy"><strong>${title}</strong><small>${esc467(meta||audit?.summary||'记录已经安全写入')}</small></span><button type="button" class="v468-complete-close" aria-label="关闭">×</button></div><div class="v468-complete-actions"><button type="button" class="primary" data-v468="next">${isSale?'继续开下一单':'继续新增调借'}</button><button type="button" data-v468="view">${isSale?'查看刚才订单':'查看刚才调借'}</button><button type="button" data-v468="home">返回首页</button></div>`;
+    document.body.appendChild(sheet);
+    sheet.querySelector('.v468-complete-close').onclick=closeCompletion468;
+    sheet.querySelector('[data-v468="next"]').onclick=()=>{
+      closeCompletion468();
+      if(isSale){
+        if(window.appState)window.appState.saleDraft=null;
+        try{sessionStorage.setItem('mocui_v463_sale_autopick','1');}catch{}
+        window.navigate?.('sale-new');
+      }else{
+        if(window.appState)window.appState.loanDraft=null;
+        if(typeof window.openLoanForm==='function')window.openLoanForm();else window.navigate?.('loans');
+      }
+    };
+    sheet.querySelector('[data-v468="view"]').onclick=()=>{
+      closeCompletion468();
+      if(isSale){
+        if(record&&typeof window.openSaleDetail==='function')window.openSaleDetail(record);
+        else{
+          const card=id?document.querySelector(`.sale-card[data-id="${CSS?.escape?CSS.escape(id):id}"]`):null;
+          if(card)card.click();else window.navigate?.('sales',{highlight:id});
+        }
+      }else{
+        if(id&&typeof window.openLoanDetail==='function')window.openLoanDetail(id);
+        else{
+          const row=id?document.querySelector(`[data-loan-id="${CSS?.escape?CSS.escape(id):id}"]`):null;
+          if(row)row.click();else window.navigate?.('loans');
+        }
+      }
+    };
+    sheet.querySelector('[data-v468="home"]').onclick=()=>{closeCompletion468();window.navigate?.('dashboard',{}, {reset:true});};
+  }
+  async function detectCompletion468({target,previous,started}){
+    // 销售：只接受从开单页完成后跳到销售单管理的路径。
+    if(target==='sales'&&previous==='sale-new'&&!window.appState?.saleDraft){
+      const audit=await latestAudit468('sale.create',started-5000);if(!audit)return;
+      const key=completionKey468('sale.create',audit.entityId);if(handledCompletion468(key))return;
+      const record=await completionRecord468('sale',audit.entityId);showCompletion468('sale',record,audit);return;
+    }
+    // 调借是全屏弹层，不改变 route；保存后会写 loan.create，再跳调借管理。
+    if(target==='loans'&&!window.appState?.loanDraft){
+      const audit=await latestAudit468('loan.create',started-5000);if(!audit)return;
+      const key=completionKey468('loan.create',audit.entityId);if(handledCompletion468(key))return;
+      const record=await completionRecord468('loan',audit.entityId);showCompletion468('loan',record,audit);
+    }
+  }
+  function installContinuous468(){
+    if(window.__mocuiContinuous468)return true;if(typeof window.navigate!=='function')return false;
+    window.__mocuiContinuous468=true;installContinuous468Styles();
+    const base=window.navigate;
+    const wrapped=async function(route,params,options){
+      const previous=String(window.appState?.route||''),started=Date.now();
+      const result=await base.apply(this,arguments);
+      Promise.resolve().then(()=>detectCompletion468({target:String(route||''),previous,started})).catch(e=>console.warn('[v4.6.8 completion]',e));
+      return result;
+    };
+    Object.defineProperty(wrapped,'__v468Wrapped',{value:true});window.navigate=wrapped;try{globalThis.navigate=wrapped;}catch{}
+    return true;
+  }
+  function waitContinuous468(){let attempts=0;const tick=()=>{attempts++;if(installContinuous468()||attempts>180)return;setTimeout(tick,50);};setTimeout(tick,320);}
+
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
@@ -844,7 +945,7 @@
       const rv=await remoteVersion();
       if(rv&&rv!==CURRENT){localStorage.setItem('mocui_downloaded_update_target',rv);await registration.update();return true;}
       await registration.update();return false;
-    }catch(e){console.warn('[v4.6.7 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.6.8 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
@@ -861,5 +962,5 @@
   window.addEventListener('pageshow',()=>checkForUpdate());
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();waitContinuous468();});
 })();
