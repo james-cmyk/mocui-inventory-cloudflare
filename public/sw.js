@@ -1,4 +1,4 @@
-const CACHE='mocui-v4.6.1-fast-start';
+const CACHE='mocui-v4.6.3-fast-workflow';
 const SHELL=[
   './','./index.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
   './ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./ui-refine-v2.4.css?v=2.4.0',
@@ -25,66 +25,28 @@ const SHELL=[
 self.addEventListener('install',event=>{
   event.waitUntil((async()=>{
     const cache=await caches.open(CACHE);
-    await Promise.allSettled(SHELL.map(async u=>{
-      try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}
-    }));
-    // 安全发布标准：不在用户当前操作时强制接管。
+    await Promise.allSettled(SHELL.map(async u=>{try{const r=await fetch(u,{cache:'no-store'});if(r.ok)await cache.put(u,r.clone());}catch{}}));
+    // 不在用户当前操作时强制接管。
   })());
 });
-
-self.addEventListener('message',event=>{
-  if(event.data?.type==='SKIP_WAITING_MANUAL')self.skipWaiting();
-});
-
+self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING_MANUAL')self.skipWaiting();});
 self.addEventListener('activate',event=>{
-  event.waitUntil((async()=>{
-    const keys=await caches.keys();
-    await Promise.all(keys.filter(k=>k.startsWith('mocui-')&&k!==CACHE).map(k=>caches.delete(k)));
-    await self.clients.claim();
-  })());
+  event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('mocui-')&&k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());
 });
-
 async function networkFallback(request,fallback){
-  try{
-    const r=await fetch(request,{cache:'no-store'});
-    if(r.ok){const c=await caches.open(CACHE);c.put(request,r.clone()).catch(()=>{});}
-    return r;
-  }catch{
-    return (await caches.match(request))||(fallback?await caches.match(fallback):null)||Response.error();
-  }
+  try{const r=await fetch(request,{cache:'no-store'});if(r.ok){const c=await caches.open(CACHE);c.put(request,r.clone()).catch(()=>{});}return r;}
+  catch{return (await caches.match(request))||(fallback?await caches.match(fallback):null)||Response.error();}
 }
-
 async function cacheFirst(request,fallback){
-  const cache=await caches.open(CACHE);
-  const cached=await cache.match(request);
-  if(cached)return cached;
-  if(fallback){const fb=await cache.match(fallback);if(fb)return fb;}
-  try{
-    const r=await fetch(request,{cache:'no-store'});
-    if(r.ok)await cache.put(request,r.clone());
-    return r;
-  }catch{return fallback?(await caches.match(fallback))||Response.error():Response.error();}
+  const cache=await caches.open(CACHE),cached=await cache.match(request);if(cached)return cached;
+  try{const r=await fetch(request,{cache:'no-store'});if(r.ok)await cache.put(request,r.clone());return r;}catch{return fallback?(await cache.match(fallback))||Response.error():Response.error();}
 }
-
 self.addEventListener('fetch',event=>{
   const req=event.request,url=new URL(req.url);
   if(req.method!=='GET'||url.origin!==self.location.origin||url.pathname.startsWith('/api/'))return;
-
-  // 版本检查必须取最新，不能被缓存挡住。
-  if(url.pathname.endsWith('/version.json')){
-    event.respondWith(networkFallback(req));
-    return;
-  }
-
-  // 极速启动核心：首页导航和静态资源优先读取本机缓存。
-  // 网络只在缓存缺失时参与，因此打开 PWA 不再等 3-4 秒网络响应。
-  if(req.mode==='navigate'){
-    event.respondWith(cacheFirst(req,'./index.html'));
-    return;
-  }
-  if(/\.(?:js|css|webmanifest|json|png|jpg|jpeg|webp|svg)$/i.test(url.pathname)){
-    event.respondWith(cacheFirst(req));
-    return;
-  }
-  event.respondWith(cacheFirst(req));
+  // App 壳与静态资源本机优先，保证重复打开接近原生 App 的速度。
+  if(req.mode==='navigate'){event.respondWith(cacheFirst(req,'./index.html'));return;}
+  if(/\.(?:js|css|webmanifest)$/i.test(url.pathname)){event.respondWith(cacheFirst(req));return;}
+  if(/version\.json$/i.test(url.pathname)){event.respondWith(networkFallback(req));return;}
+  event.respondWith(caches.match(req).then(c=>c||fetch(req).catch(()=>Response.error())));
 });
