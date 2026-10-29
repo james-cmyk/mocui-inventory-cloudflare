@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.6.3';
+  const CURRENT='4.6.4';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -389,6 +389,166 @@
   }
   function waitWorkflow463(){let attempts=0;const tick=()=>{attempts++;if(installWorkflow463()||attempts>100)return;setTimeout(tick,50);};setTimeout(tick,60);}
 
+  // ===== v4.6.4 找货 / 搜索提速 =====
+  const RECENT_PRODUCTS_464='mocui_recent_product_ids_v464';
+  function norm464(value){
+    let s=String(value??'');
+    try{s=s.normalize('NFKC');}catch{}
+    return s.toLowerCase().replace(/[，。；、·_—–/\\|()（）\[\]【】{}<>《》:：;；,+＋]+/g,' ').replace(/\s+/g,' ').trim();
+  }
+  function compact464(value){return norm464(value).replace(/\s+/g,'');}
+  function tokens464(value){
+    const s=norm464(value);if(!s)return [];
+    const chunks=s.split(/\s+/).filter(Boolean),out=[];
+    for(const chunk of chunks){
+      const parts=chunk.match(/[a-z]+|\d+(?:\.\d+)?|[\u3400-\u9fff]+|[^a-z0-9\u3400-\u9fff]+/g)||[chunk];
+      for(const p of parts){const v=compact464(p);if(v)out.push(v);}
+    }
+    return out;
+  }
+  function codeCanon464(value){
+    const raw=compact464(value).replace(/[^a-z0-9]/g,'');
+    const m=raw.match(/^([a-z]+)0*(\d+)$/);
+    if(m)return `${m[1]}${String(Number(m[2]))}`;
+    return raw.replace(/^0+(?=\d)/,'');
+  }
+  function smartMatch464(query,...fields){
+    const qc=compact464(query);if(!qc)return true;
+    const flat=fields.flat(Infinity).filter(v=>v!==undefined&&v!==null).map(v=>String(v));
+    const hay=compact464(flat.join(' '));
+    const ts=tokens464(query);
+    if(ts.length&&ts.every(t=>hay.includes(t)))return true;
+    const qcode=codeCanon464(query);
+    if(qcode.length>=2&&flat.some(v=>{const c=codeCanon464(v);return c&&c.includes(qcode);} ))return true;
+    // 单字/双字仍允许宽松查找，方便柜台快速找货；更长关键词要求词组命中，减少误匹配。
+    if(qc.length===1)return hay.includes(qc);
+    return false;
+  }
+  function productRank464(p,query){
+    const q=compact464(query);if(!q)return 100;
+    const qcode=codeCanon464(query),code=compact464(p?.code),ccode=codeCanon464(p?.code),name=compact464(p?.name),color=compact464(p?.color),category=compact464(p?.category),note=compact464(p?.note);
+    if(code===q||ccode===qcode)return 0;
+    if((q&&code.endsWith(q))||(qcode&&ccode.endsWith(qcode)))return 5;
+    if(name===q)return 10;
+    if(name.startsWith(q))return 20;
+    if(name.includes(q))return 30;
+    if(color.includes(q))return 40;
+    if(category.includes(q))return 50;
+    if(note.includes(q))return 60;
+    const hay=compact464([p?.name,p?.code,p?.color,p?.category,p?.note].join(' '));
+    const ts=tokens464(query);if(ts.length&&ts.every(t=>hay.includes(t)))return 70;
+    return 90;
+  }
+  function loadRecent464(){try{const a=JSON.parse(localStorage.getItem(RECENT_PRODUCTS_464)||'[]');return Array.isArray(a)?a.map(String).slice(0,24):[];}catch{return [];}}
+  function rememberRecent464(ids){
+    try{
+      const incoming=(Array.isArray(ids)?ids:[ids]).filter(Boolean).map(String),old=loadRecent464();
+      const next=[...incoming,...old.filter(x=>!incoming.includes(x))].slice(0,24);
+      localStorage.setItem(RECENT_PRODUCTS_464,JSON.stringify(next));
+    }catch{}
+  }
+  function installSmartMatcher464(){
+    try{window.mocuiFuzzyMatch=smartMatch464;globalThis.mocuiFuzzyMatch=smartMatch464;}catch{}
+    try{if(window.MocuiCoreV4?.search)window.MocuiCoreV4.search.match=smartMatch464;}catch{}
+  }
+  async function productMap464(){
+    try{const rows=await window.dbAll?.('products');return new Map((rows||[]).map(p=>[String(p.id),p]));}catch{return new Map();}
+  }
+  async function reorderProductList464(){
+    const input=document.getElementById('productSearch'),list=document.getElementById('productList');if(!input||!list)return;
+    const query=input.value.trim();if(!query)return;
+    const map=await productMap464(),nodes=[...list.querySelectorAll('[data-product-id]')];
+    nodes.sort((a,b)=>{
+      const pa=map.get(String(a.dataset.productId)),pb=map.get(String(b.dataset.productId));
+      const ra=productRank464(pa,query),rb=productRank464(pb,query);return ra-rb;
+    }).forEach(n=>list.appendChild(n));
+  }
+  function enhanceProducts464(){
+    const input=document.getElementById('productSearch');if(!input)return;
+    input.placeholder='名称 / 货号尾号 / 颜色';input.setAttribute('enterkeyhint','search');
+    if(input.dataset.v464Smart==='1'){setTimeout(reorderProductList464,220);return;}
+    input.dataset.v464Smart='1';let timer=null;
+    const queue=()=>{clearTimeout(timer);timer=setTimeout(reorderProductList464,230);};
+    input.addEventListener('input',queue);input.addEventListener('search',queue);input.addEventListener('compositionend',queue);
+    document.getElementById('stockFilter')?.addEventListener('change',queue);
+    listRecentProductClicks464();queue();
+  }
+  function listRecentProductClicks464(){
+    if(document.documentElement.dataset.v464RecentClicks==='1')return;
+    document.documentElement.dataset.v464RecentClicks='1';
+    document.addEventListener('click',e=>{
+      const row=e.target?.closest?.('[data-product-id]');if(row?.dataset?.productId)rememberRecent464(row.dataset.productId);
+      if(e.target?.closest?.('#v455PickerConfirm')){
+        const ids=[...document.querySelectorAll('#v455PickerList .v455-picker-row.is-selected')].map(x=>x.dataset.id).filter(Boolean);
+        if(ids.length)rememberRecent464(ids);
+      }
+      if(e.target?.closest?.('#v446HeaderSearch,#v44PageSearch,.v44-page-mic'))setTimeout(enhanceGlobal464,60);
+      if(e.target?.closest?.('#chooseProducts,#loanChooseProducts,#v463LoanQuickChoose'))setTimeout(enhancePicker464,80);
+    },false);
+  }
+  async function enhancePicker464(){
+    const root=document.getElementById('v455TradePicker'),input=root?.querySelector('#v455PickerSearch'),list=root?.querySelector('#v455PickerList');if(!root||!input||!list)return;
+    input.placeholder='名称 / 货号尾号 / 颜色';input.setAttribute('enterkeyhint','search');
+    const map=await productMap464();
+    const reorder=()=>{
+      const q=input.value.trim(),recent=loadRecent464(),recentPos=new Map(recent.map((id,i)=>[id,i]));
+      const nodes=[...list.querySelectorAll('.v455-picker-row')];
+      nodes.sort((a,b)=>{
+        const sa=a.classList.contains('is-selected')?0:1,sb=b.classList.contains('is-selected')?0:1;if(sa!==sb)return sa-sb;
+        const pa=map.get(String(a.dataset.id)),pb=map.get(String(b.dataset.id));
+        if(q){const ra=productRank464(pa,q),rb=productRank464(pb,q);if(ra!==rb)return ra-rb;}
+        else{const ia=recentPos.has(String(a.dataset.id))?recentPos.get(String(a.dataset.id)):999,ib=recentPos.has(String(b.dataset.id))?recentPos.get(String(b.dataset.id)):999;if(ia!==ib)return ia-ib;}
+        const aa=Number(pa?.stock||0)>0?0:1,bb=Number(pb?.stock||0)>0?0:1;return aa-bb;
+      }).forEach(n=>list.appendChild(n));
+    };
+    if(input.dataset.v464Smart!=='1'){
+      input.dataset.v464Smart='1';let t=null;const queue=()=>{clearTimeout(t);t=setTimeout(reorder,30);};
+      input.addEventListener('input',queue);input.addEventListener('search',queue);input.addEventListener('compositionend',queue);
+    }
+    const confirm=root.querySelector('#v455PickerConfirm');
+    if(confirm&&confirm.dataset.v464Recent!=='1'){
+      confirm.dataset.v464Recent='1';
+      confirm.addEventListener('click',()=>{const ids=[...root.querySelectorAll('.v455-picker-row.is-selected')].map(x=>x.dataset.id).filter(Boolean);if(ids.length)rememberRecent464(ids);},true);
+    }
+    setTimeout(reorder,35);
+  }
+  function globalRank464(btn,query){
+    const kind=btn.dataset.kind||'',text=compact464(btn.textContent),q=compact464(query);let score=kind==='product'?0:kind==='loan'?20:kind==='sale'?25:35;
+    if(!q)return score;
+    const idx=text.indexOf(q);if(idx===0)score-=12;else if(idx>0)score+=Math.min(18,idx);else score+=30;
+    return score;
+  }
+  function enhanceGlobal464(){
+    const input=document.getElementById('v44GlobalQuery'),host=document.getElementById('v44GlobalResults');if(!input||!host)return;
+    input.placeholder='货号尾号、名称、颜色、同行、备注…';
+    const help=document.querySelector('.v44-search-help');if(help)help.textContent='支持货号尾号；同时搜索商品、已售记录、调借、同行货、过手单和货源库';
+    const reorder=()=>setTimeout(()=>{
+      const q=input.value.trim(),nodes=[...host.querySelectorAll('.v44-search-result')];
+      nodes.sort((a,b)=>globalRank464(a,q)-globalRank464(b,q)).forEach(n=>host.appendChild(n));
+    },20);
+    if(input.dataset.v464Smart!=='1'){input.dataset.v464Smart='1';input.addEventListener('input',reorder);input.addEventListener('compositionend',reorder);input.addEventListener('search',reorder);}
+    reorder();
+  }
+  function syncSearchVersion464(){
+    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 找货提速版`;
+    const more=document.querySelector('#v44MoreVersion strong');if(more)more.textContent=`v${CURRENT}`;
+  }
+  function wrap464(name,after){
+    const fn=window[name];if(typeof fn!=='function'||fn.__v464Wrapped)return;
+    const wrapped=async function(){const r=await fn.apply(this,arguments);try{after?.();}catch(e){console.warn(`[v4.6.4 ${name}]`,e);}return r;};
+    Object.defineProperty(wrapped,'__v464Wrapped',{value:true});window[name]=wrapped;try{globalThis[name]=wrapped;}catch{}
+  }
+  function installSearch464(){
+    if(window.__mocuiSearch464)return true;
+    if(typeof window.renderProducts!=='function'||typeof window.renderDashboard!=='function')return false;
+    window.__mocuiSearch464=true;installSmartMatcher464();listRecentProductClicks464();
+    wrap464('renderProducts',()=>{enhanceProducts464();syncSearchVersion464();});
+    ['renderDashboard','renderSaleNew','renderLoanFormModal','renderLoans','renderSales','renderReports','renderMore'].forEach(name=>wrap464(name,()=>{syncSearchVersion464();setTimeout(()=>{enhanceGlobal464();enhancePicker464();},40);}));
+    document.addEventListener('focusin',e=>{if(e.target?.id==='v44GlobalQuery')enhanceGlobal464();if(e.target?.id==='v455PickerSearch')enhancePicker464();});
+    if(window.appState?.route==='products')enhanceProducts464();setTimeout(()=>{enhanceGlobal464();enhancePicker464();},60);syncSearchVersion464();return true;
+  }
+  function waitSearch464(){let attempts=0;const tick=()=>{attempts++;if(installSearch464()||attempts>110)return;setTimeout(tick,50);};setTimeout(tick,100);}
+
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
@@ -401,7 +561,7 @@
       const rv=await remoteVersion();
       if(rv&&rv!==CURRENT){localStorage.setItem('mocui_downloaded_update_target',rv);await registration.update();return true;}
       await registration.update();return false;
-    }catch(e){console.warn('[v4.6.3 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.6.4 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
@@ -418,5 +578,5 @@
   window.addEventListener('pageshow',()=>checkForUpdate());
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();});
 })();
