@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.6.4';
+  const CURRENT='4.6.5';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -549,6 +549,130 @@
   }
   function waitSearch464(){let attempts=0;const tick=()=>{attempts++;if(installSearch464()||attempts>110)return;setTimeout(tick,50);};setTimeout(tick,100);}
 
+  // ===== v4.6.5 商品卡片 + 一键操作 =====
+  function installProductCards465Styles(){
+    if(document.getElementById('mocuiProductCards465Styles'))return;
+    const style=document.createElement('style');style.id='mocuiProductCards465Styles';
+    style.textContent=`
+      #productList .v465-product-card{display:grid!important;grid-template-columns:58px minmax(0,1fr) auto!important;grid-template-rows:auto auto!important;gap:4px 10px!important;align-items:center!important;padding:10px!important;border-radius:16px!important;min-height:78px!important}
+      #productList .v465-product-card>.thumb{grid-column:1!important;grid-row:1 / span 2!important;width:58px!important;height:58px!important;min-width:58px!important;border-radius:13px!important;object-fit:cover!important;align-self:center!important}
+      #productList .v465-product-card>.item-main{grid-column:2!important;grid-row:1!important;min-width:0!important;align-self:center!important}
+      #productList .v465-product-card>.item-right{grid-column:3!important;grid-row:1!important;align-self:center!important;text-align:right!important;min-width:66px!important}
+      .v465-product-name{font-size:14px!important;line-height:1.25!important;font-weight:820!important;color:#17221e!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+      .v465-product-meta{margin-top:3px;font-size:10.5px;line-height:1.35;color:#718078;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .v465-product-price{margin-top:4px;font-size:13px;font-weight:800;color:#24342d}
+      .v465-stock-badge{display:inline-flex;align-items:center;justify-content:center;min-height:26px;padding:4px 8px;border-radius:999px;background:#eaf7f1;color:#177355;font-size:10.5px;font-weight:800;white-space:nowrap}
+      .v465-stock-badge.low{background:#fff4df;color:#a35d00}.v465-stock-badge.out{background:#f3f4f4;color:#8b9590}
+      .v465-product-actions{grid-column:2 / 4;grid-row:2;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:4px}
+      .v465-product-actions button{appearance:none;border:1px solid #dfe7e3;background:#fff;border-radius:10px;min-height:36px;padding:6px 8px;color:#42534b;font-size:11px;font-weight:780;box-shadow:none!important}
+      .v465-product-actions button[data-v465-action="sale"]{background:#eef8f3;border-color:#cfe5d9;color:#176b50}
+      .v465-product-actions button:disabled{opacity:.38!important;background:#f5f6f6!important;color:#929b97!important;border-color:#e7eae9!important}
+      #productList .v465-product-card.has-actions{grid-template-rows:auto auto!important;padding-bottom:9px!important}
+      #productList .v465-product-card:not(.has-actions)>.item-main{grid-row:1 / span 2!important}
+      #productList .v465-product-card:not(.has-actions)>.item-right{grid-row:1 / span 2!important}
+      @media(max-width:380px){#productList .v465-product-card{grid-template-columns:52px minmax(0,1fr) auto!important;gap:4px 8px!important}#productList .v465-product-card>.thumb{width:52px!important;height:52px!important;min-width:52px!important}.v465-product-actions button{font-size:10.5px;padding:5px}}
+    `;
+    document.head.appendChild(style);
+  }
+  function esc465(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+  function money465(v){
+    const n=Number(v||0);try{return new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY',minimumFractionDigits:0,maximumFractionDigits:2}).format(n);}catch{return `¥${n.toFixed(0)}`;}
+  }
+  function bestImage465(p){
+    const first=Array.isArray(p?.images)?p.images.find(Boolean):'';return first||p?.image||p?.cover||p?.thumbnail||p?.thumb||'';
+  }
+  function localDateTime465(date=new Date()){
+    const pad=n=>String(n).padStart(2,'0');return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+  function localDate465(date=new Date()){
+    const pad=n=>String(n).padStart(2,'0');return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`;
+  }
+  function persistSaleDraft465(d){
+    try{localStorage.setItem('mocui_sale_manual_draft_v455',JSON.stringify({...d,items:(d.items||[]).map(i=>({...i,image:''})),_manualDraft:true,_manualDraftSavedAt:new Date().toISOString()}));}catch{}
+  }
+  function persistLoanDraft465(d){
+    try{localStorage.setItem('mocui_loan_draft_v1',JSON.stringify({...d,images:[],items:(d.items||[]).map(i=>({...i,image:''})),_manualDraft:true,_manualDraftSavedAt:new Date().toISOString()}));}catch{}
+  }
+  function quickSale465(p){
+    if(Number(p?.stock||0)<=0){notify('这件商品当前库存为 0，可先编辑或盘点补库存');return;}
+    let d=window.appState?.saleDraft;
+    if(!d){const saved=safeLoad('mocui_sale_manual_draft_v455');if(saved?._manualDraft)d=saved;}
+    if(!d)d={customerId:'',customerName:'',createdAt:localDateTime465(),items:[],accessoryUsages:[],directAccessoryCost:0,otherDirectCost:0,discountType:'none',discountValue:0,received:'',note:''};
+    d.items=Array.isArray(d.items)?d.items:[];
+    const existing=d.items.find(i=>String(i.productId)===String(p.id));
+    if(existing){existing.stock=Number(p.stock||0);existing.productName=p.name;existing.productCode=p.code;existing.color=p.color;existing.costPrice=Number(p.costPrice||0);if(!Number.isFinite(Number(existing.price)))existing.price=Number(p.salePrice||0);}
+    else d.items.unshift({productId:p.id,productName:p.name,productCode:p.code,color:p.color,qty:1,price:Number(p.salePrice||0),costPrice:Number(p.costPrice||0),image:bestImage465(p),stock:Number(p.stock||0),productNote:p.note||'',itemNote:''});
+    if(window.appState)window.appState.saleDraft=d;persistSaleDraft465(d);rememberRecent464(p.id);sessionStorage.removeItem('mocui_v463_sale_autopick');window.navigate?.('sale-new');
+  }
+  function quickLoan465(p){
+    if(Number(p?.stock||0)<=0){notify('这件商品当前库存为 0，不能直接借出');return;}
+    const current=window.appState?.loanDraft||safeLoad('mocui_loan_draft_v1');
+    if(current&&hasLoanDraft(current)){
+      if(window.appState)window.appState.loanDraft=current;
+      notify('已有调借草稿，已先打开草稿，避免覆盖未完成内容');
+      window.openLoanForm?.();return;
+    }
+    const now=new Date(),due=new Date(now);due.setDate(due.getDate()+30);
+    const d={type:'lend',person:'',date:localDateTime465(now),expectedReturnDate:localDate465(due),note:'',images:[],items:[{productId:p.id,productName:p.name,productCode:p.code,color:p.color,qty:1,stock:Number(p.stock||0),image:bestImage465(p),productNote:p.note||'',costPrice:Number(p.costPrice||0),salePrice:Number(p.salePrice||0)}]};
+    if(window.appState)window.appState.loanDraft=d;persistLoanDraft465(d);rememberRecent464(p.id);window.openLoanForm?.();
+  }
+  async function quickEdit465(p){
+    rememberRecent464(p.id);if(typeof window.openProductForm==='function')await window.openProductForm(p);else window.navigate?.('product-detail',{id:p.id});
+  }
+  async function enhanceProductCards465(){
+    if(window.appState?.route!=='products')return;
+    installProductCards465Styles();
+    const list=document.getElementById('productList'),input=document.getElementById('productSearch');if(!list)return;
+    const map=await productMap464(),rows=[...list.querySelectorAll('[data-product-id]')],query=String(input?.value||'').trim();
+    const showActions=!!query||rows.length<=30;
+    for(const row of rows){
+      const p=map.get(String(row.dataset.productId));if(!p)continue;
+      row.classList.add('v465-product-card');row.classList.toggle('has-actions',showActions);
+      const main=row.querySelector('.item-main'),right=row.querySelector('.item-right');
+      if(main){
+        main.innerHTML=`<div class="v465-product-name">${esc465(p.name||'未命名商品')}</div><div class="v465-product-meta">${esc465(p.code||'无货号')} · ${esc465(p.color||'未填写颜色')}${p.category?` · ${esc465(p.category)}`:''}</div><div class="v465-product-price">售价 ${money465(p.salePrice)}</div>`;
+      }
+      const stock=Number(p.stock||0),stockClass=stock<=0?'out':stock<=1?'low':'';
+      if(right)right.innerHTML=`<span class="v465-stock-badge ${stockClass}">${stock<=0?'无库存':`库存 ${stock}`}</span>`;
+      let actions=row.querySelector('.v465-product-actions');
+      if(showActions&&!actions){actions=document.createElement('div');actions.className='v465-product-actions';actions.innerHTML='<button type="button" data-v465-action="sale">销售</button><button type="button" data-v465-action="loan">借出</button><button type="button" data-v465-action="edit">编辑</button>';row.appendChild(actions);}
+      if(!showActions&&actions){actions.remove();actions=null;}
+      if(actions){
+        const sale=actions.querySelector('[data-v465-action="sale"]'),loan=actions.querySelector('[data-v465-action="loan"]'),edit=actions.querySelector('[data-v465-action="edit"]');
+        if(sale){sale.disabled=stock<=0;sale.onclick=e=>{e.preventDefault();e.stopPropagation();quickSale465(p);};}
+        if(loan){loan.disabled=stock<=0;loan.onclick=e=>{e.preventDefault();e.stopPropagation();quickLoan465(p);};}
+        if(edit)edit.onclick=e=>{e.preventDefault();e.stopPropagation();quickEdit465(p);};
+      }
+    }
+  }
+  function bindProductRefresh465(){
+    if(document.documentElement.dataset.v465ProductRefresh==='1')return;
+    document.documentElement.dataset.v465ProductRefresh='1';let timer=null;
+    const queue=(delay=280)=>{clearTimeout(timer);timer=setTimeout(()=>enhanceProductCards465(),delay);};
+    document.addEventListener('input',e=>{if(e.target?.id==='productSearch')queue(300);},true);
+    document.addEventListener('compositionend',e=>{if(e.target?.id==='productSearch')queue(300);},true);
+    document.addEventListener('change',e=>{if(e.target?.id==='stockFilter')queue(120);},true);
+    document.addEventListener('click',e=>{if(e.target?.closest?.('#categoryPickerRows [data-category-id]'))queue(120);},true);
+  }
+  function syncProductVersion465(){
+    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 商品快捷操作版`;
+    const more=document.querySelector('#v44MoreVersion strong');if(more)more.textContent=`v${CURRENT}`;
+  }
+  function wrap465(name,after){
+    const fn=window[name];if(typeof fn!=='function'||fn.__v465Wrapped)return;
+    const wrapped=async function(){const r=await fn.apply(this,arguments);try{after?.();}catch(e){console.warn(`[v4.6.5 ${name}]`,e);}return r;};
+    Object.defineProperty(wrapped,'__v465Wrapped',{value:true});window[name]=wrapped;try{globalThis[name]=wrapped;}catch{}
+  }
+  function installProductCards465(){
+    if(window.__mocuiProductCards465)return true;
+    if(typeof window.renderProducts!=='function')return false;
+    window.__mocuiProductCards465=true;installProductCards465Styles();bindProductRefresh465();
+    wrap465('renderProducts',()=>{enhanceProductCards465();syncProductVersion465();});
+    ['renderDashboard','renderSaleNew','renderLoanFormModal','renderLoans','renderSales','renderReports','renderMore'].forEach(name=>wrap465(name,syncProductVersion465));
+    if(window.appState?.route==='products')enhanceProductCards465();syncProductVersion465();return true;
+  }
+  function waitProductCards465(){let attempts=0;const tick=()=>{attempts++;if(installProductCards465()||attempts>120)return;setTimeout(tick,50);};setTimeout(tick,140);}
+
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
@@ -578,5 +702,5 @@
   window.addEventListener('pageshow',()=>checkForUpdate());
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();});
 })();
