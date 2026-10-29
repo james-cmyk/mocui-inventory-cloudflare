@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.6.5';
+  const CURRENT='4.6.6';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -673,6 +673,89 @@
   }
   function waitProductCards465(){let attempts=0;const tick=()=>{attempts++;if(installProductCards465()||attempts>120)return;setTimeout(tick,50);};setTimeout(tick,140);}
 
+  // ===== v4.6.6 首页待办 + 最近操作 =====
+  function installHomeFocus466Styles(){
+    if(document.getElementById('mocuiHomeFocus466Styles'))return;
+    const style=document.createElement('style');style.id='mocuiHomeFocus466Styles';
+    style.textContent=`
+      .v466-section{margin:10px 0 12px}.v466-head{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;margin:0 3px 7px}.v466-head strong{font-size:14px;color:#17221e}.v466-head span{font-size:10.5px;color:#87928d}
+      .v466-task-list,.v466-recent-list{display:grid;gap:7px}.v466-task{appearance:none;width:100%;min-height:54px;border:1px solid #e2e8e5;background:#fff;border-radius:15px;padding:9px 11px;display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:9px;text-align:left;color:#24342d;box-shadow:none!important}
+      .v466-task.danger{background:#fff7f6;border-color:#f2d2ce}.v466-task.warn{background:#fffbf2;border-color:#eeddb8}.v466-task.xhs{background:#faf7ff;border-color:#e7dcf5}
+      .v466-task-icon{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;font-size:12px;font-weight:850;background:#eef5f1;color:#176b50}.v466-task.danger .v466-task-icon{background:#fde8e6;color:#b42318}.v466-task.warn .v466-task-icon{background:#fff0cf;color:#9b6500}.v466-task.xhs .v466-task-icon{background:#eee5fa;color:#7658cb}
+      .v466-task-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.v466-task-copy strong{font-size:13px;line-height:1.2}.v466-task-copy small{font-size:10.5px;color:#748179;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v466-task-count{font-size:12px;font-weight:820;color:#53615a;white-space:nowrap}
+      .v466-recent{appearance:none;width:100%;border:1px solid #e6ebe8;background:#fff;border-radius:14px;min-height:52px;padding:9px 11px;display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:9px;align-items:center;text-align:left;color:#24342d;box-shadow:none!important}
+      .v466-recent-icon{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:#f1f5f3;color:#526159;font-size:11px;font-weight:850}.v466-recent-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.v466-recent-copy strong{font-size:12.5px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v466-recent-copy small{font-size:10px;color:#87928d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.v466-recent-time{font-size:10px;color:#929d98;white-space:nowrap}
+      .v466-empty-note{font-size:10.5px;color:#8b9691;margin:4px 3px 0}
+      @media(max-width:380px){.v466-task{grid-template-columns:31px minmax(0,1fr) auto;padding:8px}.v466-task-icon{width:31px;height:31px}.v466-recent{grid-template-columns:30px minmax(0,1fr) auto;padding:8px}.v466-recent-icon{width:30px;height:30px}}
+    `;
+    document.head.appendChild(style);
+  }
+  function esc466(v){return String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+  function timeValue466(v){const d=new Date(v||0);return Number.isNaN(d.getTime())?0:d.getTime();}
+  function relativeTime466(v){
+    const t=timeValue466(v);if(!t)return '';
+    const diff=Date.now()-t,min=Math.floor(diff/60000),d=new Date(t),now=new Date();
+    if(min<1)return '刚刚';if(min<60)return `${min}分钟前`;
+    const same=d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth()&&d.getDate()===now.getDate();
+    const hh=`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;if(same)return hh;
+    const y=new Date(now);y.setDate(now.getDate()-1);if(d.getFullYear()===y.getFullYear()&&d.getMonth()===y.getMonth()&&d.getDate()===y.getDate())return `昨天 ${hh}`;
+    return `${d.getMonth()+1}/${d.getDate()}`;
+  }
+  function loanOpen466(l){try{if(typeof window.loanIsOpen==='function')return !!window.loanIsOpen(l);}catch{}return !['returned','completed','closed'].includes(String(l?.status||'active'));}
+  function loanDue466(l){try{if(typeof window.loanDueDate==='function')return window.loanDueDate(l);}catch{}return l?.expectedReturnDate||l?.date||l?.createdAt||'';}
+  function daysToDue466(l){const raw=loanDue466(l);if(!raw)return 9999;const due=new Date(String(raw).slice(0,10)+'T00:00:00'),now=new Date();now.setHours(0,0,0,0);if(Number.isNaN(due.getTime()))return 9999;return Math.ceil((due-now)/86400000);}
+  function isXhsPending466(s){return s?.saleChannel==='xhs'&&s?.status==='active'&&['pending','returning'].includes(String(s?.xhsStatus||'pending'));}
+  function xhsDue466(s){if(!isXhsPending466(s)||!s?.xhsConfirmDueDate)return 9999;const due=new Date(String(s.xhsConfirmDueDate).slice(0,10)+'T23:59:59'),today=new Date();today.setHours(0,0,0,0);if(Number.isNaN(due.getTime()))return 9999;return Math.ceil((due-today)/86400000);}
+  function auditLabel466(action=''){
+    const map={'sale.create':'销售开单','sale.cancel':'撤销销售','sale.restore':'恢复销售','loan.create':'新增调借','loan.return':'调借归还','loan.return.undo':'撤销归还','loan.return_undo':'撤销归还','product.create':'新增商品','product.update':'修改商品','product.copy':'复制商品'};
+    if(map[action])return map[action];if(action.startsWith('stock.'))return '库存调整';if(action.startsWith('loan.'))return '调借操作';if(action.startsWith('sale.'))return '销售操作';if(action.startsWith('product.'))return '商品操作';return '最近操作';
+  }
+  function auditIcon466(type,action=''){if(type==='sale'||action.startsWith('sale.'))return '售';if(type==='loan'||action.startsWith('loan.'))return '调';if(type==='product'||action.startsWith('product.')||action.startsWith('stock.'))return '货';return '记';}
+  let homeFocusSeq466=0;
+  async function enhanceDashboard466(){
+    if(window.appState?.route!=='dashboard'||typeof window.dbAll!=='function')return;
+    const seq=++homeFocusSeq466,home=document.querySelector('.v44-home');if(!home)return;installHomeFocus466Styles();
+    document.getElementById('v466HomeTasks')?.remove();document.getElementById('v466Recent')?.remove();document.querySelector('.v44-attention')?.remove();
+    let sales=[],loans=[],logs=[];
+    try{[sales,loans,logs]=await Promise.all([window.dbAll('sales'),window.dbAll('loans'),window.dbAll('auditLogs')]);}catch(e){console.warn('[v4.6.6 home data]',e);return;}
+    if(seq!==homeFocusSeq466||window.appState?.route!=='dashboard'||!document.body.contains(home))return;
+    const openLoans=(loans||[]).filter(loanOpen466),overdue=openLoans.filter(l=>daysToDue466(l)<0),dueSoon=openLoans.filter(l=>{const d=daysToDue466(l);return d>=0&&d<=7;}),dueXhs=(sales||[]).filter(s=>isXhsPending466(s)&&xhsDue466(s)<=0);
+    const tasks=[];
+    if(overdue.length)tasks.push({kind:'overdue',cls:'danger',icon:'急',title:'调借已超期',meta:`最久超期 ${Math.max(...overdue.map(l=>Math.abs(daysToDue466(l))))} 天 · 点开处理归还/售出`,count:`${overdue.length} 单`});
+    if(dueSoon.length)tasks.push({kind:'soon',cls:'warn',icon:'期',title:'7 天内到期',meta:`最近一单 ${Math.min(...dueSoon.map(daysToDue466))} 天后到期`,count:`${dueSoon.length} 单`});
+    if(dueXhs.length)tasks.push({kind:'xhs',cls:'xhs',icon:'薯',title:'小红书待确认',meta:'已到确认日或退款处理中',count:`${dueXhs.length} 单`});
+    const actions=home.querySelector('.v446-actions-section');
+    if(tasks.length){
+      const sec=document.createElement('section');sec.id='v466HomeTasks';sec.className='v466-section';sec.innerHTML=`<div class="v466-head"><strong>待处理</strong><span>只显示需要你动作的事项</span></div><div class="v466-task-list">${tasks.map(t=>`<button type="button" class="v466-task ${t.cls}" data-v466-task="${t.kind}"><span class="v466-task-icon">${t.icon}</span><span class="v466-task-copy"><strong>${t.title}</strong><small>${t.meta}</small></span><span class="v466-task-count">${t.count} ›</span></button>`).join('')}</div>`;
+      home.insertBefore(sec,actions||home.lastElementChild);
+      sec.querySelectorAll('[data-v466-task]').forEach(btn=>btn.onclick=()=>{const k=btn.dataset.v466Task;if(k==='xhs')window.navigate?.('sales',{xhs:'pending'});else window.navigate?.('loans');});
+    }
+    const supported=(logs||[]).filter(x=>['sale','loan','product'].includes(String(x.entityType||''))||/^(sale|loan|product|stock)\./.test(String(x.action||''))).sort((a,b)=>timeValue466(b.createdAt)-timeValue466(a.createdAt)).slice(0,4);
+    if(supported.length){
+      const sec=document.createElement('section');sec.id='v466Recent';sec.className='v466-section';sec.innerHTML=`<div class="v466-head"><strong>最近操作</strong><span>最多显示 4 条</span></div><div class="v466-recent-list">${supported.map((x,i)=>`<button type="button" class="v466-recent" data-v466-recent="${i}"><span class="v466-recent-icon">${auditIcon466(String(x.entityType||''),String(x.action||''))}</span><span class="v466-recent-copy"><strong>${esc466(auditLabel466(String(x.action||'')))}</strong><small>${esc466(x.summary||x.entityId||'')}</small></span><span class="v466-recent-time">${relativeTime466(x.createdAt)}</span></button>`).join('')}</div>`;
+      home.insertBefore(sec,actions||home.lastElementChild);
+      sec.querySelectorAll('[data-v466-recent]').forEach(btn=>btn.onclick=()=>{const x=supported[Number(btn.dataset.v466Recent)||0];if(!x)return;const type=String(x.entityType||''),id=String(x.entityId||'');if(type==='product'&&id)window.navigate?.('product-detail',{id});else if(type==='loan'&&id&&typeof window.openLoanDetail==='function')window.openLoanDetail(id);else if(type==='loan')window.navigate?.('loans');else if(type==='sale')window.navigate?.('sales',{highlight:id});});
+    }
+    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 首页待办版`;
+  }
+  function scheduleDashboard466(){
+    const run=()=>enhanceDashboard466().catch(e=>console.warn('[v4.6.6 dashboard]',e));
+    if('requestIdleCallback'in window)requestIdleCallback(run,{timeout:160});else setTimeout(run,0);
+  }
+  function wrap466(name,after){
+    const fn=window[name];if(typeof fn!=='function'||fn.__v466Wrapped)return;
+    const wrapped=async function(){const r=await fn.apply(this,arguments);try{after?.();}catch(e){console.warn(`[v4.6.6 ${name}]`,e);}return r;};
+    Object.defineProperty(wrapped,'__v466Wrapped',{value:true});window[name]=wrapped;try{globalThis[name]=wrapped;}catch{}
+  }
+  function installHomeFocus466(){
+    if(window.__mocuiHomeFocus466)return true;
+    if(!window.__mocuiProductCards465||typeof window.renderDashboard!=='function')return false;
+    window.__mocuiHomeFocus466=true;installHomeFocus466Styles();wrap466('renderDashboard',scheduleDashboard466);
+    ['renderProducts','renderLoans','renderSales','renderReports','renderMore'].forEach(name=>wrap466(name,()=>{const more=document.querySelector('#v44MoreVersion strong');if(more)more.textContent=CURRENT;}));
+    if(window.appState?.route==='dashboard')scheduleDashboard466();return true;
+  }
+  function waitHomeFocus466(){let attempts=0;const tick=()=>{attempts++;if(installHomeFocus466()||attempts>140)return;setTimeout(tick,50);};setTimeout(tick,220);}
+
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
@@ -685,7 +768,7 @@
       const rv=await remoteVersion();
       if(rv&&rv!==CURRENT){localStorage.setItem('mocui_downloaded_update_target',rv);await registration.update();return true;}
       await registration.update();return false;
-    }catch(e){console.warn('[v4.6.4 update]',e);return false;}finally{checking=false;}
+    }catch(e){console.warn('[v4.6.6 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
@@ -702,5 +785,5 @@
   window.addEventListener('pageshow',()=>checkForUpdate());
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();});
 })();
