@@ -19,7 +19,7 @@
         return Math.min(n(item.qty),Math.max(0,n(item.returnedQty)));
       }
       if((loan?.returns||[]).length){
-        return activeReturnEvents(loan).reduce((sum,event)=>sum+n((event.items||[]).find(x=>x.productId===item?.productId)?.qty),0);
+        return activeReturnEvents(loan).reduce((sum,event)=>sum+(event.items||[]).reduce((total,part)=>total+(String(part?.productId)===String(item?.productId)?Math.max(0,n(part.qty)):0),0),0);
       }
       if(loan?.status==='returned')return n(item?.qty);
       return 0;
@@ -45,7 +45,7 @@
   function recomputeReturnedQty(loan){
     const active=activeReturnEvents(loan);
     loan.items=(loan.items||[]).map(item=>{
-      const returned=active.reduce((sum,event)=>sum+n((event.items||[]).find(x=>x.productId===item.productId)?.qty),0);
+      const returned=active.reduce((sum,event)=>sum+(event.items||[]).reduce((total,part)=>total+(String(part?.productId)===String(item.productId)?Math.max(0,n(part.qty)):0),0),0);
       return {...item,returnedQty:Math.min(n(item.qty),Math.max(0,returned))};
     });
     return loan;

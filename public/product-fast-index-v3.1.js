@@ -150,13 +150,19 @@
     await new Promise(r=>requestAnimationFrame(r));
     if(myGen!==generation||appState.route!=='products')return;
 
-    let ready=await metaGet('ready');
-    if(!ready){
-      $('#productList').innerHTML='<div class="mocui-index-loading"><strong>首次建立快速索引</strong><br>只执行一次，完成后商品页会明显更快。</div>';
+    let [ready,productsRaw,categories]=await Promise.all([metaGet('ready'),allIndex(),dbAll('categories')]);
+    if(!ready&&!productsRaw.length){
+      $('#productList').innerHTML='<div class="mocui-index-loading">正在建立首次商品索引…</div>';
       await rebuildIndex(true);
+      productsRaw=await allIndex();
+      ready=true;
+    }else if(!ready){
+      // 上次同步导致索引待更新时，先显示已有商品，再在后台刷新。
+      setTimeout(()=>rebuildIndex(true).catch(e=>console.warn('[v4.7.7 rebuild]',e)),100);
+      const banner=document.createElement('div');banner.className='notice warn v477-index-notice';
+      banner.textContent='正在后台更新商品索引，最新库存请以商品详情为准';
+      $('#productList')?.insertAdjacentElement('beforebegin',banner);
     }
-
-    const [productsRaw,categories]=await Promise.all([allIndex(),dbAll('categories')]);
     if(myGen!==generation||appState.route!=='products')return;
     const products=productsRaw.filter(p=>!p.historicalOnly);
     products.sort((a,b)=>new Date(b.updatedAt||0)-new Date(a.updatedAt||0));
@@ -221,17 +227,22 @@
   setTimeout(()=>clearInterval(timer),10000);
 
   // 云端同步完成后不阻塞当前页面；空闲时重建一次轻量索引。
-  let reconcileTimer=null;
-  window.addEventListener('cloud-sync-ok',()=>{
+  let reconcileTimer=null,lastRemoteCursor=null;
+  window.addEventListener('cloud-sync-ok',event=>{
+    // 此更新包不覆盖同步引擎，因此以服务端增量游标判断是否需要刷新索引。
+    // 相同游标的空轮询绝不重复全表建索引；发生新同步时在后台延迟重建。
+    const nextCursor=Number(event?.detail?.cursor||0);
+    if(nextCursor>0 && lastRemoteCursor===nextCursor)return;
+    lastRemoteCursor=nextCursor;
     clearTimeout(reconcileTimer);
     reconcileTimer=setTimeout(()=>{
-      metaSet('ready',false).then(()=>rebuildIndex(true)).catch(()=>{});
-    },2500);
+      rebuildIndex(true).catch(e=>console.warn('[v4.7.7 index sync]',e));
+    },4500);
   });
 
   // 首次安装在浏览器空闲时建立索引，用户不进入商品页也可以预热。
   const warm=()=>rebuildIndex(false).catch(()=>{});
-  if('requestIdleCallback' in window)requestIdleCallback(warm,{timeout:5000});else setTimeout(warm,2500);
+  if('requestIdleCallback' in window)requestIdleCallback(warm,{timeout:8000});else setTimeout(warm,4500);
 
   window.MocuiFastProductIndex={version:VERSION,rebuild:()=>rebuildIndex(true)};
 })();

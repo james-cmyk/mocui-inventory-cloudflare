@@ -120,7 +120,8 @@
     return src?`<img class="v455-picker-thumb" src="${escHtml(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:`<div class="v455-picker-thumb v455-picker-placeholder" aria-label="暂无图片">图</div>`;
   }
   function bindProductThumbFallbacks(list,products){
-    qa('img.v455-picker-thumb',list).forEach(img=>{
+    qa('img.v455-picker-thumb:not([data-v477-fallback])',list).forEach(img=>{
+      img.dataset.v477Fallback='1';
       const row=img.closest('.v455-picker-row'),id=String(row?.dataset?.id||'');
       const p=products.find(x=>String(x.id)===id);if(!p)return;
       const candidates=productMediaCandidates(p);let index=Math.max(0,candidates.indexOf(img.getAttribute('src')||''));
@@ -139,10 +140,11 @@
   async function openTradePicker({mode='sale',title='选择商品与数量',currentItems=[],onConfirm}){
     closePicker();
     const products=(await dbAll('products')).filter(p=>!p.historicalOnly);
+    const productById=new Map(products.map(p=>[String(p.id),p]));
     const current=new Map((currentItems||[]).map(i=>[String(i.productId||i.id),i]));
     const selected=new Map();
     for(const [id,item] of current){
-      const p=products.find(x=>String(x.id)===id);if(!p)continue;
+      const p=productById.get(id);if(!p)continue;
       selected.set(id,{product:p,qty:Math.max(0,num(item.qty))||defaultQty(p,mode)});
     }
 
@@ -179,6 +181,8 @@
     document.body.appendChild(root);document.body.classList.add('v455-picker-open');
 
     const search=q('#v455PickerSearch',root),list=q('#v455PickerList',root),confirm=q('#v455PickerConfirm',root),summary=q('#v455PickerSelectedSummary',root);
+    const PAGE_SIZE=36;
+    let visibleCount=0,filteredRows=[],lastSearch='';
 
     function totalQty(){let t=0;for(const x of selected.values())t+=num(x.qty);return Math.round(t*100)/100;}
     function validSelection(){
@@ -217,38 +221,84 @@
       </div>`;
     }
     function bindRows(){
-      qa('.v455-picker-row',list).forEach(row=>{
-        const id=row.dataset.id,p=products.find(x=>String(x.id)===id);if(!p)return;
+      // 仅绑定新插入的行，避免“加载更多”重复绑定按钮监听器。
+      qa('.v455-picker-row:not([data-v477-bound])',list).forEach(row=>{
+        row.dataset.v477Bound='1';
+        const id=row.dataset.id,p=productById.get(id);if(!p)return;
         const check=q('.v455-picker-check',row),input=q('.v455-qty-input',row),minus=q('.v455-qty-minus',row),plus=q('.v455-qty-plus',row);
-        const setSelected=(on)=>{
+        const setSelected=on=>{
           if(on){
             if(!selectable(p))return;
-            const existing=selected.get(id);selected.set(id,{product:p,qty:existing?.qty||defaultQty(p)});
+            const existing=selected.get(id);
+            selected.set(id,{product:p,qty:existing?.qty||defaultQty(p)});
           }else selected.delete(id);
-          draw();
+          // 原地切换状态；绝不重绘/移动当前列表，也不清空滚动位置。
+          const active=selected.has(id);
+          row.classList.toggle('is-selected',active);
+          q('.v455-picker-qty',row)?.classList.toggle('is-hidden',!active);
+          check.setAttribute('aria-pressed',String(active));
+          check.setAttribute('aria-label',`${active?'取消选择':'选择'} ${p.name||'商品'}`);
+          if(active&&input)input.value=String(selected.get(id).qty);
+          updateFooter();
         };
         check.onclick=e=>{e.preventDefault();e.stopPropagation();setSelected(!selected.has(id));};
-        input?.addEventListener('focus',()=>{if(!selected.has(id)&&selectable(p)){selected.set(id,{product:p,qty:defaultQty(p)});row.classList.add('is-selected');q('.v455-picker-qty',row)?.classList.remove('is-hidden');check.setAttribute('aria-pressed','true');updateFooter();}});
+        input?.addEventListener('focus',()=>{if(!selected.has(id))setSelected(true);});
         input?.addEventListener('input',()=>{
-          if(!selected.has(id))selected.set(id,{product:p,qty:defaultQty(p)});
-          const v=normalizeQty(p,input.value);selected.get(id).qty=v;input.value=String(v||'');updateFooter();
+          if(!selected.has(id))setSelected(true);
+          if(!selected.has(id))return;
+          const v=normalizeQty(p,input.value);selected.get(id).qty=v;updateFooter();
         });
-        minus?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(!selected.has(id))return;let v=normalizeQty(p,num(selected.get(id).qty)-1);if(v<=0)v=Math.min(defaultQty(p),maxQty(p));selected.get(id).qty=v;input.value=String(v);updateFooter();});
-        plus?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();if(!selected.has(id)){setSelected(true);return;}const v=normalizeQty(p,num(selected.get(id).qty)+1);selected.get(id).qty=v;input.value=String(v);updateFooter();});
+        minus?.addEventListener('click',e=>{
+          e.preventDefault();e.stopPropagation();if(!selected.has(id))return;
+          let v=normalizeQty(p,num(selected.get(id).qty)-1);
+          if(v<=0)v=Math.min(defaultQty(p),maxQty(p));
+          selected.get(id).qty=v;if(input)input.value=String(v);updateFooter();
+        });
+        plus?.addEventListener('click',e=>{
+          e.preventDefault();e.stopPropagation();if(!selected.has(id)){setSelected(true);return;}
+          const v=normalizeQty(p,num(selected.get(id).qty)+1);
+          selected.get(id).qty=v;if(input)input.value=String(v);updateFooter();
+        });
       });
+    }
+    function bindMore(){
+      const old=list.querySelector('#v477PickerMore');if(old)old.remove();
+      if(visibleCount>=filteredRows.length)return;
+      const btn=document.createElement('button');btn.id='v477PickerMore';btn.type='button';btn.className='btn secondary block v477-picker-more';
+      btn.textContent=`继续显示（剩余 ${filteredRows.length-visibleCount} 件）`;
+      btn.onclick=appendMore;list.appendChild(btn);
+    }
+    function appendMore(){
+      const more=list.querySelector('#v477PickerMore');if(more)more.remove();
+      const extra=filteredRows.slice(visibleCount,visibleCount+PAGE_SIZE);
+      if(!extra.length)return;
+      list.insertAdjacentHTML('beforeend',extra.map(rowHtml).join(''));
+      visibleCount+=extra.length;
+      bindProductThumbFallbacks(list,products);
+      bindRows();bindMore();updateFooter();
     }
     function draw(){
       const term=safeText(search.value).toLowerCase();
-      const rows=products.filter(p=>{
+      // 只有用户修改关键词才重建列表；勾选/修改数量不改变排序与滚动位置。
+      if(term===lastSearch&&visibleCount>0)return;
+      lastSearch=term;
+      filteredRows=products.filter(p=>{
         if(!term)return true;
         const hay=[p.name,p.code,p.color,p.note].map(v=>String(v||'').toLowerCase()).join(' ');
         if(hay.includes(term))return true;
         try{return typeof mocuiFuzzyMatch==='function'&&mocuiFuzzyMatch(term,p.name,p.code,p.color,p.note);}catch{return false;}
       });
-      list.innerHTML=rows.length?rows.map(rowHtml).join(''):`<div class="v455-picker-empty"><strong>没有找到商品</strong><span>换名称、货号或颜色试试</span></div>`;
-      bindProductThumbFallbacks(list,products);
-      bindRows();updateFooter();
+      visibleCount=0;list.innerHTML='';list.scrollTop=0;
+      if(!filteredRows.length){list.innerHTML='<div class="v455-picker-empty"><strong>没有找到商品</strong><span>换名称、货号或颜色试试</span></div>';updateFooter();return;}
+      appendMore();
     }
+    // 手机滑到底部才继续加载，避免几百张商品图片和 DOM 同时建立。
+    let loadingMore=false;
+    list.addEventListener('scroll',()=>{
+      if(loadingMore||visibleCount>=filteredRows.length)return;
+      if(list.scrollTop+list.clientHeight<list.scrollHeight-220)return;
+      loadingMore=true;requestAnimationFrame(()=>{loadingMore=false;appendMore();});
+    },{passive:true});
 
     q('#v455PickerClose',root).onclick=closePicker;
     q('#v455PickerCancel',root).onclick=closePicker;
@@ -260,7 +310,7 @@
       closePicker();
       onConfirm?.(rows);
     };
-    draw();setTimeout(()=>search.focus(),80);
+    draw(); // 默认不自动弹键盘；可直接滑动浏览商品。
   }
 
   function installSaleEnhancements(){

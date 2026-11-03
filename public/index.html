@@ -47,7 +47,30 @@
     <nav class="bottom-nav" aria-label="主导航"><button data-route="dashboard" class="nav-item active"><span><img src="/assets/icons/navigation/ic_nav_home.png" alt="" /></span><b>首页</b></button><button data-route="products" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_products.png" alt="" /></span><b>货品</b></button><button data-route="loans" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_lending.png" alt="" /></span><b>调借</b></button><button data-route="reports" class="nav-item"><span><img src="/assets/icons/actions/ic_action_sales_report.png" alt="" /></span><b>报表</b></button><button data-route="more" class="nav-item"><span><img src="/assets/icons/navigation/ic_nav_more.png" alt="" /></span><b>更多</b></button></nav>
   </div>
   <div id="modalRoot"></div><div id="toast" class="toast"></div>
-  <script src="pwa.js?v=4.6.0"></script>
+  <script>
+  (()=>{
+    function reveal(message){
+      const screen=document.getElementById('bootScreen');
+      if(!screen||screen.classList.contains('is-ready'))return;
+      screen.classList.add('has-error');
+      const label=document.getElementById('bootStatus');if(label)label.textContent=message;
+      const retry=document.getElementById('bootRetry');
+      if(retry){retry.textContent='重新连接';retry.onclick=()=>location.reload();}
+    }
+    window.addEventListener('error',e=>{
+      if(e.target?.tagName==='SCRIPT')reveal('应用脚本加载失败，可能是网络或旧缓存，请检查连接后重试');
+    },true);
+    setTimeout(()=>{
+      const screen=document.getElementById('bootScreen');
+      if(screen&&!screen.classList.contains('is-ready')&&!screen.classList.contains('has-error')){
+        const retry=document.getElementById('bootRetry');if(retry){retry.style.display='inline-block';retry.onclick=()=>location.reload();}
+        const status=document.getElementById('bootStatus');
+        if(status)status.textContent='启动时间较长，正在检查连接；可点击重新连接（不会清空数据）';
+      }
+    },12000);
+  })();
+  </script>
+  <script src="pwa.js?v=4.7.7"></script>
   <script src="cloud.js"></script>
   <script src="sync-v3.js?v=3.0.0"></script>
   <script src="qinsilk-import.js"></script>
@@ -61,7 +84,7 @@
   <script src="ui-refine-v2.4.1.js?v=2.4.2"></script>
   <script src="ui-icons.js?v=1.4.1"></script>
   <script src="ui-shell-guard.js"></script>
-  <script src="product-fast-index-v3.1.js?v=4.0.0"></script>
+  <script src="product-fast-index-v3.1.js?v=4.7.7"></script>
   <script src="large-data-lists-v3.14.js?v=4.0.0"></script>
   <script src="analytics-precompute-v3.15.js?v=3.17.0"></script>
   <script src="analytics-incremental-v3.17.js?v=3.17.0"></script>
@@ -81,6 +104,6 @@
   <script src="sales-stock-hotfix-v4.4.4.js?v=4.4.4"></script>
   <script src="media-multi-v4.4.5.js?v=4.5.9"></script>
   <script src="ios-input-zoom-fix-v4.5.4.js?v=4.5.4"></script>
-  <script src="trade-picker-v4.5.8.js?v=4.5.8"></script>
-  <script src="loan-return-undo-v4.6.0.js?v=4.6.0"></script>
+  <script src="trade-picker-v4.5.8.js?v=4.7.7"></script>
+  <script src="loan-return-undo-v4.6.0.js?v=4.7.7"></script>
 </body></html>
