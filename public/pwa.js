@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.7.3';
+  const CURRENT='4.7.5';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -70,39 +70,10 @@
 
   // ===== v4.6.1 本机优先极速启动（保留） =====
   function installFastCloudStart(CloudSync){
+    // v4.7.5：sync-v3 已经负责“本机先显示 + 后台增量同步”。
+    // 不再提前放行 cloud bootstrap，否则登录失效/首次设备初始化时可能与 sync-v3 抢时序。
     if(!CloudSync||CloudSync.__mocuiFastStartV461)return;
-    const originalBootstrap=CloudSync.bootstrap?.bind(CloudSync);
-    const originalPull=CloudSync.pull?.bind(CloudSync);
-    const originalSchedule=CloudSync.schedule?.bind(CloudSync);
-    if(!originalBootstrap||!originalPull)return;
-    let authGate=null,queuedSchedule=false,queuedDelay=1000;
-    CloudSync.bootstrap=(options={})=>{
-      if(!authGate){
-        authGate=Promise.resolve()
-          .then(()=>originalBootstrap({...options,deferPull:true}))
-          .then(value=>({ok:true,value}),error=>({ok:false,error}));
-      }
-      return Promise.resolve({mode:'local-first',deferred:true});
-    };
-    CloudSync.pull=async(...args)=>{
-      if(authGate){
-        const gate=authGate,result=await gate;
-        if(authGate===gate)authGate=null;
-        if(!result.ok)throw result.error;
-        if(queuedSchedule&&originalSchedule){
-          const d=queuedDelay;queuedSchedule=false;queuedDelay=1000;
-          setTimeout(()=>originalSchedule(d),0);
-        }
-      }
-      return originalPull(...args);
-    };
-    if(originalSchedule){
-      CloudSync.schedule=(delay=1000)=>{
-        if(authGate){queuedSchedule=true;queuedDelay=Math.min(queuedDelay,Number(delay)||1000);return;}
-        return originalSchedule(delay);
-      };
-    }
-    Object.defineProperty(CloudSync,'__mocuiFastStartV461',{value:true,configurable:false});
+    try{Object.defineProperty(CloudSync,'__mocuiFastStartV461',{value:true,configurable:false});}catch{}
   }
 
   try{
@@ -444,6 +415,29 @@
 
   // ===== v4.6.4 找货 / 搜索提速 =====
   const RECENT_PRODUCTS_464='mocui_recent_product_ids_v464';
+  let productSearchIndex464={byCode:new Map(),byName:new Map()};
+  function updateProductSearchIndex464(rows=[]){
+    const byCode=new Map(),byName=new Map();
+    for(const p of rows||[]){
+      const code=codeCanon464(p?.code),raw=compact464(p?.code),name=compact464(p?.name);
+      if(code)byCode.set(code,p);if(raw)byCode.set(raw,p);if(name&&!byName.has(name))byName.set(name,p);
+    }
+    productSearchIndex464={byCode,byName};
+  }
+  function enrichSearchFields464(fields=[]){
+    const flat=fields.flat(Infinity).filter(v=>v!==undefined&&v!==null).map(v=>String(v)),extra=[];
+    let product=null;
+    for(const v of flat){
+      const c=codeCanon464(v),raw=compact464(v);
+      product=productSearchIndex464.byCode.get(c)||productSearchIndex464.byCode.get(raw)||null;
+      if(product)break;
+    }
+    if(!product){
+      for(const v of flat){const name=compact464(v);product=productSearchIndex464.byName.get(name)||null;if(product)break;}
+    }
+    if(product)extra.push(product.category,product.note,product.qinsilk?.size,product.size,product.spec,product.ringSize);
+    return [...flat,...extra.filter(v=>v!==undefined&&v!==null).map(v=>String(v))];
+  }
   function norm464(value){
     let s=String(value??'');
     try{s=s.normalize('NFKC');}catch{}
@@ -467,14 +461,13 @@
   }
   function smartMatch464(query,...fields){
     const qc=compact464(query);if(!qc)return true;
-    const flat=fields.flat(Infinity).filter(v=>v!==undefined&&v!==null).map(v=>String(v));
-    const hay=compact464(flat.join(' '));
+    const flat=enrichSearchFields464(fields),fieldText=flat.map(compact464).filter(Boolean);
     const ts=tokens464(query);
-    if(ts.length&&ts.every(t=>hay.includes(t)))return true;
+    // 每个关键词必须真实存在于某一个字段，禁止跨字段边界拼出不存在的词。
+    if(ts.length&&ts.every(t=>fieldText.some(h=>h.includes(t))))return true;
     const qcode=codeCanon464(query);
     if(qcode.length>=2&&flat.some(v=>{const c=codeCanon464(v);return c&&c.includes(qcode);} ))return true;
-    // 单字/双字仍允许宽松查找，方便柜台快速找货；更长关键词要求词组命中，减少误匹配。
-    if(qc.length===1)return hay.includes(qc);
+    if(qc.length===1)return fieldText.some(h=>h.includes(qc));
     return false;
   }
   function productRank464(p,query){
@@ -505,7 +498,7 @@
     try{if(window.MocuiCoreV4?.search)window.MocuiCoreV4.search.match=smartMatch464;}catch{}
   }
   async function productMap464(){
-    try{const rows=await window.dbAll?.('products');return new Map((rows||[]).map(p=>[String(p.id),p]));}catch{return new Map();}
+    try{const rows=await window.dbAll?.('products');updateProductSearchIndex464(rows||[]);return new Map((rows||[]).map(p=>[String(p.id),p]));}catch{return new Map();}
   }
   async function reorderProductList464(){
     const input=document.getElementById('productSearch'),list=document.getElementById('productList');if(!input||!list)return;
@@ -518,12 +511,31 @@
   }
   function enhanceProducts464(){
     const input=document.getElementById('productSearch');if(!input)return;
-    input.placeholder='名称 / 货号尾号 / 颜色';input.setAttribute('enterkeyhint','search');
+    const stock=document.getElementById('stockFilter');
+    input.placeholder='名称 / 货号尾号 / 颜色 / 分类 / 备注';input.setAttribute('enterkeyhint','search');
+    productMap464().catch(()=>{});
+    if(input.dataset.v474StockBridge!=='1'){
+      input.dataset.v474StockBridge='1';let internal=false,autoAll=false,userStock=false;
+      if(stock){
+        stock.addEventListener('change',()=>{if(!internal){userStock=true;autoAll=false;}});
+      }
+      const bridgeStock=()=>{
+        if(!stock||userStock)return;
+        const q=input.value.trim();
+        if(q&&stock.value==='in'){
+          internal=true;stock.value='';stock.dispatchEvent(new Event('change',{bubbles:true}));internal=false;autoAll=true;
+        }else if(!q&&autoAll&&stock.value===''){
+          internal=true;stock.value='in';stock.dispatchEvent(new Event('change',{bubbles:true}));internal=false;autoAll=false;
+        }
+      };
+      input.addEventListener('input',bridgeStock);input.addEventListener('search',bridgeStock);input.addEventListener('compositionend',bridgeStock);
+      setTimeout(bridgeStock,0);
+    }
     if(input.dataset.v464Smart==='1'){setTimeout(reorderProductList464,220);return;}
     input.dataset.v464Smart='1';let timer=null;
-    const queue=()=>{clearTimeout(timer);timer=setTimeout(reorderProductList464,230);};
+    const queue=()=>{clearTimeout(timer);timer=setTimeout(()=>{productMap464().catch(()=>{});reorderProductList464();},80);};
     input.addEventListener('input',queue);input.addEventListener('search',queue);input.addEventListener('compositionend',queue);
-    document.getElementById('stockFilter')?.addEventListener('change',queue);
+    stock?.addEventListener('change',queue);
     listRecentProductClicks464();queue();
   }
   function listRecentProductClicks464(){
@@ -541,7 +553,7 @@
   }
   async function enhancePicker464(){
     const root=document.getElementById('v455TradePicker'),input=root?.querySelector('#v455PickerSearch'),list=root?.querySelector('#v455PickerList');if(!root||!input||!list)return;
-    input.placeholder='名称 / 货号尾号 / 颜色';input.setAttribute('enterkeyhint','search');
+    input.placeholder='名称 / 货号尾号 / 颜色 / 分类 / 备注';input.setAttribute('enterkeyhint','search');
     const map=await productMap464();
     const reorder=()=>{
       const q=input.value.trim(),recent=loadRecent464(),recentPos=new Map(recent.map((id,i)=>[id,i]));
@@ -590,7 +602,7 @@
   function installSearch464(){
     if(window.__mocuiSearch464)return true;
     if(typeof window.renderProducts!=='function'||typeof window.renderDashboard!=='function')return false;
-    window.__mocuiSearch464=true;installSmartMatcher464();listRecentProductClicks464();
+    window.__mocuiSearch464=true;installSmartMatcher464();listRecentProductClicks464();productMap464().catch(()=>{});
     wrap464('renderProducts',()=>{enhanceProducts464();syncSearchVersion464();});
     ['renderDashboard','renderSaleNew','renderLoanFormModal','renderLoans','renderSales','renderReports','renderMore'].forEach(name=>wrap464(name,()=>{syncSearchVersion464();setTimeout(()=>{enhanceGlobal464();enhancePicker464();},40);}));
     document.addEventListener('focusin',e=>{if(e.target?.id==='v44GlobalQuery')enhanceGlobal464();if(e.target?.id==='v455PickerSearch')enhancePicker464();});
@@ -1186,7 +1198,7 @@
   async function renderSyncPanel472(root){
     const host=root?.querySelector?.('#v472SyncPanel')||document.getElementById('v472SyncPanel');if(!host)return;
     const st=await syncSnapshot472(),copy=stateCopy472(st),pending=Number(st.outbox||0),dirty=Number(st.dirty||0),conflicts=Number(st.conflicts||0);
-    host.innerHTML=`<div class="v472-sync-shell"><div class="v472-sync-hero ${copy.cls}"><span class="v472-sync-mark">${copy.mark}</span><span class="v472-sync-copy"><strong>${esc472(copy.title)}</strong><small>${esc472(copy.sub)}</small></span></div><div class="v472-sync-grid"><div class="v472-sync-metric"><span>待上传队列</span><strong class="${pending?'warn':''}">${pending} 条</strong></div><div class="v472-sync-metric"><span>待捕获变更</span><strong class="${dirty?'warn':''}">${dirty} 条</strong></div><div class="v472-sync-metric"><span>同步冲突</span><strong class="${conflicts?'danger':''}">${conflicts} 条</strong></div><div class="v472-sync-metric"><span>最近云端确认</span><strong>${esc472(fmtTime472(st.last?.at))}</strong></div><div class="v472-sync-metric"><span>网络</span><strong>${st.online?'在线':'离线'}</strong></div><div class="v472-sync-metric"><span>本地 JSON 备份</span><strong>${esc472(st.backup.label)}</strong></div></div>${conflicts?'<div class="notice danger"><strong>不要强制覆盖云端。</strong><br>先到“数据与设置”核对冲突来源，确认哪一边的数据正确。</div>':''}<div class="v472-sync-actions"><button id="v472SyncNow" class="btn primary" type="button" ${st.online?'':'disabled'}>立即同步</button><button id="v472BackupNow" class="btn secondary" type="button">导出备份</button><button id="v472SyncSettings" class="btn secondary" type="button">数据设置</button></div><div class="v472-sync-note"><strong>判断口径：</strong>“已同步”只在增量同步队列、待捕获变更和冲突都为 0 时显示；不是只看网络是否在线。</div></div>`;
+    host.innerHTML=`<div class="v472-sync-shell"><div class="v472-sync-hero ${copy.cls}"><span class="v472-sync-mark">${copy.mark}</span><span class="v472-sync-copy"><strong>${esc472(copy.title)}</strong><small>${esc472(copy.sub)}</small></span></div><div class="v472-sync-grid"><div class="v472-sync-metric"><span>待上传队列</span><strong class="${pending?'warn':''}">${pending} 条</strong></div><div class="v472-sync-metric"><span>待捕获变更</span><strong class="${dirty?'warn':''}">${dirty} 条</strong></div><div class="v472-sync-metric"><span>同步冲突</span><strong class="${conflicts?'danger':''}">${conflicts} 条</strong></div><div class="v472-sync-metric"><span>最近云端确认</span><strong>${esc472(fmtTime472(st.last?.at))}</strong></div><div class="v472-sync-metric"><span>网络</span><strong>${st.online?'在线':'离线'}</strong></div><div class="v472-sync-metric"><span>本地 JSON 备份</span><strong>${esc472(st.backup.label)}</strong></div></div>${conflicts?'<div class="notice danger"><strong>检测到同步冲突。</strong><br>先导出完整 JSON 备份。增量同步模式下已停用“整库强制覆盖云端”，避免误删另一台设备的新数据。</div>':''}<div class="v472-sync-actions"><button id="v472SyncNow" class="btn primary" type="button" ${st.online?'':'disabled'}>立即同步</button><button id="v472BackupNow" class="btn secondary" type="button">导出备份</button><button id="v472SyncSettings" class="btn secondary" type="button">数据设置</button></div><div class="v472-sync-note"><strong>判断口径：</strong>“已同步”只在增量同步队列、待捕获变更和冲突都为 0 时显示；不是只看网络是否在线。</div></div>`;
     const syncBtn=host.querySelector('#v472SyncNow');if(syncBtn)syncBtn.onclick=async()=>{if(!navigator.onLine)return;syncBtn.disabled=true;syncBtn.textContent='同步中…';try{const result=await window.CloudSync?.pull?.();const verified=await syncSnapshot472();if(Number(verified.outbox||0)===0&&Number(verified.dirty||0)===0&&Number(verified.conflicts||0)===0)saveSyncOk472(result||{});notify('同步检查完成');}catch(e){notify(`同步失败：${e?.message||'请稍后重试'}`);}finally{await refreshSyncBadge472();await renderSyncPanel472(root);}};
     const backupBtn=host.querySelector('#v472BackupNow');if(backupBtn)backupBtn.onclick=async()=>{try{if(typeof window.backupAll==='function')await window.backupAll();else{notify('请到“数据与设置”导出完整备份');closeModal472();window.navigate?.('settings');}}catch(e){notify(e?.message||'导出失败');}setTimeout(()=>renderSyncPanel472(root),120);};
     const settingsBtn=host.querySelector('#v472SyncSettings');if(settingsBtn)settingsBtn.onclick=()=>{closeModal472();window.navigate?.('settings');};
@@ -1306,19 +1318,104 @@
   }
   function waitLoanPeople473(){let attempts=0;const tick=()=>{attempts++;if(installLoanPeople473()||attempts>260)return;setTimeout(tick,50);};setTimeout(tick,520);}
 
+  // ===== v4.7.4 搜索统一修正：跨库存 + 分类/备注补索引 =====
+  function syncVersion474(){
+    const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 搜索统一修正版`;
+    const more=document.querySelector('#v44MoreVersion strong');if(more)more.textContent=`v${CURRENT}`;
+  }
+  function installSearchFix474(){
+    if(window.__mocuiSearchFix474)return true;if(!window.__mocuiLoanPeople473)return false;
+    window.__mocuiSearchFix474=true;productMap464().catch(()=>{});
+    ['renderDashboard','renderProducts','renderSales','renderLoans','renderReports','renderMore','renderSaleNew','renderLoanFormModal','renderSettings'].forEach(name=>addAfterHook471(name,'v474',()=>{syncVersion474();if(name==='renderProducts')setTimeout(enhanceProducts464,20);},{awaitAfter:false}));
+    document.addEventListener('focusin',e=>{if(e.target?.id==='v455PickerSearch'){productMap464().then(()=>enhancePicker464()).catch(()=>{});}if(e.target?.id==='productSearch')productMap464().catch(()=>{});});
+    if(window.appState?.route==='products')setTimeout(enhanceProducts464,30);syncVersion474();return true;
+  }
+  function waitSearchFix474(){let attempts=0;const tick=()=>{attempts++;if(installSearchFix474()||attempts>280)return;setTimeout(tick,50);};setTimeout(tick,560);}
+
+  // ===== v4.7.5 整体稳定修复：更新接管 / 同步入口收紧 / 版本显示统一 =====
+  const UPDATE_PENDING_475='mocui_pending_app_update';
+  let updateActivating475=false;
+  function updateSafe475(){
+    const route=String(window.appState?.route||'');
+    if(document.querySelector('#modalRoot .modal-backdrop'))return false;
+    if(window.__mocuiProductDirty)return false;
+    if(['sale-new','pass-deal-new'].includes(route))return false;
+    if(document.getElementById('loanForm'))return false;
+    const active=document.activeElement;
+    if(active?.matches?.('input,textarea,select,[contenteditable="true"]'))return false;
+    return true;
+  }
+  function syncStableLabel475(){
+    const foot=document.querySelector('.v44-home-foot');if(foot&&foot.textContent!==`v${CURRENT} · 整体稳定修复版`)foot.textContent=`v${CURRENT} · 整体稳定修复版`;
+    const more=document.querySelector('#v44MoreVersion strong');if(more&&more.textContent!==`v${CURRENT}`)more.textContent=`v${CURRENT}`;
+    if(window.appState?.route==='settings'){
+      document.querySelectorAll('#main .notice').forEach(el=>{if(/版本：v\d/i.test(el.textContent||''))el.innerHTML=el.innerHTML.replace(/版本：v[^·<]+/i,`版本：v${CURRENT} `);});
+    }
+  }
+  function hardenSettings475(){
+    if(window.appState?.route!=='settings')return;
+    const force=document.getElementById('forceCloudUpload');
+    if(force&&window.CloudSync?.incrementalV3){
+      force.onclick=null;force.disabled=true;force.textContent='增量同步模式：整库覆盖已停用';
+      if(!document.getElementById('v475ForceNotice')){
+        const note=document.createElement('div');note.id='v475ForceNotice';note.className='notice warn';note.style.marginTop='8px';
+        note.innerHTML='<strong>为什么停用？</strong><br>当前使用增量同步。整库覆盖可能把另一台设备刚产生的新记录一起覆盖。遇到冲突先导出完整 JSON 备份，不要用整库覆盖处理。';
+        force.insertAdjacentElement('afterend',note);
+      }
+    }
+    syncStableLabel475();
+  }
+  function installStability475(){
+    if(window.__mocuiStability475)return true;if(!window.__mocuiSearchFix474)return false;
+    window.__mocuiStability475=true;
+    ['renderDashboard','renderProducts','renderSales','renderLoans','renderReports','renderMore','renderSaleNew','renderLoanFormModal','renderSettings'].forEach(name=>addAfterHook471(name,'v475',()=>{syncStableLabel475();if(name==='renderSettings')hardenSettings475();setTimeout(syncStableLabel475,560);},{awaitAfter:false}));
+    addNavigateHook471('after','v475-update',()=>{setTimeout(()=>{tryActivatePending475();syncStableLabel475();},80);});
+    if(window.appState?.route==='settings')hardenSettings475();syncStableLabel475();setTimeout(syncStableLabel475,620);return true;
+  }
+  function waitStability475(){let attempts=0;const tick=()=>{attempts++;if(installStability475()||attempts>300)return;setTimeout(tick,50);};setTimeout(tick,610);}
+
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
   async function remoteVersion(){try{const r=await fetch(`${VERSION_URL}?t=${Date.now()}`,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return String(j.version||'');}catch{return '';}}
+  function waitForWaiting475(reg,timeout=2600){
+    return new Promise(resolve=>{
+      if(!reg)return resolve(null);if(reg.waiting)return resolve(reg.waiting);
+      let done=false,timer=setTimeout(()=>finish(reg.waiting||null),timeout);
+      const finish=worker=>{if(done)return;done=true;clearTimeout(timer);resolve(worker||null);};
+      const watch=worker=>{if(!worker)return;worker.addEventListener('statechange',()=>{if(worker.state==='installed')finish(reg.waiting||worker);});};
+      watch(reg.installing);reg.addEventListener?.('updatefound',()=>watch(reg.installing),{once:true});
+    });
+  }
+  function armReload475(){
+    try{sessionStorage.setItem('mocui_update_reload_once','1');}catch{}
+    if(navigator.serviceWorker&&navigator.serviceWorker.controller){
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{let yes=false;try{yes=sessionStorage.getItem('mocui_update_reload_once')==='1';sessionStorage.removeItem('mocui_update_reload_once');}catch{}if(yes)location.reload();},{once:true});
+    }
+  }
+  async function activateWaiting475(reg,target=''){
+    if(!reg?.waiting||updateActivating475)return false;
+    if(!updateSafe475()){try{localStorage.setItem(UPDATE_PENDING_475,target||'waiting');}catch{}return false;}
+    updateActivating475=true;try{if(target)sessionStorage.setItem('mocui_update_target',target);armReload475();reg.waiting.postMessage({type:'SKIP_WAITING_MANUAL'});return true;}catch(e){updateActivating475=false;console.warn('[v4.7.5 activate update]',e);return false;}
+  }
+  async function tryActivatePending475(){
+    if(!('serviceWorker' in navigator)||!updateSafe475())return false;
+    try{registration=registration||await navigator.serviceWorker.getRegistration('./');if(!registration?.waiting)return false;const target=localStorage.getItem(UPDATE_PENDING_475)||localStorage.getItem('mocui_downloaded_update_target')||'';return activateWaiting475(registration,target);}catch{return false;}
+  }
   async function checkForUpdate({force=false}={}){
     if(!('serviceWorker' in navigator)||!navigator.onLine||checking)return false;
-    const now=Date.now();if(!force&&now-lastCheck<60000)return false;lastCheck=now;checking=true;
+    const now=Date.now();if(!force&&now-lastCheck<60000){await tryActivatePending475();return false;}lastCheck=now;checking=true;
     try{
       registration=registration||await navigator.serviceWorker.getRegistration('./')||await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
       const rv=await remoteVersion();
-      if(rv&&rv!==CURRENT){localStorage.setItem('mocui_downloaded_update_target',rv);await registration.update();return true;}
-      await registration.update();return false;
-    }catch(e){console.warn('[v4.7.3 update]',e);return false;}finally{checking=false;}
+      if(registration.waiting){await activateWaiting475(registration,rv||'');return true;}
+      await registration.update();
+      if(rv&&rv!==CURRENT){
+        localStorage.setItem('mocui_downloaded_update_target',rv);localStorage.setItem(UPDATE_PENDING_475,rv);
+        const waiting=await waitForWaiting475(registration);if(waiting)await activateWaiting475(registration,rv);return true;
+      }
+      await tryActivatePending475();return false;
+    }catch(e){console.warn('[v4.7.5 update]',e);return false;}finally{checking=false;}
   }
   async function repairAppCache(){
     if(!navigator.onLine){notify('当前离线，不能刷新应用代码');return;}
@@ -1326,14 +1423,18 @@
   }
   async function registerSW(){
     if(!('serviceWorker' in navigator))return;
-    try{registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});setTimeout(()=>checkForUpdate({force:true}),800);}catch(e){console.warn('PWA service worker registration failed',e);}
+    try{registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});if(registration.waiting)await tryActivatePending475();setTimeout(()=>checkForUpdate({force:true}),800);}catch(e){console.warn('PWA service worker registration failed',e);}
   }
-  function announceVersion(){localStorage.setItem('mocui_last_ui_version',CURRENT);localStorage.removeItem('mocui_pending_app_update');sessionStorage.removeItem('mocui_update_target');sessionStorage.removeItem('mocui_update_ready');sessionStorage.removeItem('mocui_update_reload_once');}
+  function announceVersion(){
+    localStorage.setItem('mocui_last_ui_version',CURRENT);
+    try{const pending=localStorage.getItem(UPDATE_PENDING_475);if(pending===CURRENT)localStorage.removeItem(UPDATE_PENDING_475);const downloaded=localStorage.getItem('mocui_downloaded_update_target');if(downloaded===CURRENT)localStorage.removeItem('mocui_downloaded_update_target');}catch{}
+    sessionStorage.removeItem('mocui_update_target');sessionStorage.removeItem('mocui_update_ready');
+  }
 
   window.addEventListener('online',()=>{updateOnlineState();checkForUpdate({force:true});});
   window.addEventListener('offline',updateOnlineState);
   window.addEventListener('pageshow',()=>checkForUpdate());
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){tryActivatePending475();checkForUpdate();}});
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();waitContinuous468();waitPageMemory469();waitGlobalDirect470();waitSyncSafety472();waitLoanPeople473();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();waitContinuous468();waitPageMemory469();waitGlobalDirect470();waitSyncSafety472();waitLoanPeople473();waitSearchFix474();waitStability475();});
 })();
