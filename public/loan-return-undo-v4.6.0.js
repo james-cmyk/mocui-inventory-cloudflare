@@ -70,6 +70,7 @@
         const done=await stockMoveExists(item.productId,'loan_return_cancel','loan_return_cancel',event.id);
         if(!done)pending.push(item);
       }
+      if(pending.length!==items.length)throw new Error('此次归还存在部分撤销流水，需先人工核对，已阻止重复扣库存');
       if(undoDeltaSign<0&&pending.length)await validateStock(pending,-1);
 
       const totalQty=items.reduce((sum,i)=>sum+n(i.qty),0);
@@ -77,35 +78,27 @@
       const ok=await confirmDialog(`确认撤销这次归还？\n\n${items.map(i=>`${i.productName||'商品'} × ${fmtInt(i.qty)}`).join('\n')}\n\n${effect}。撤销后调借单会重新打开，可重新填写正确的归还数量。`);
       if(!ok)return;
 
-      const cancelledAt=nowISO();
-      for(const item of items){
-        await adjustStock(
-          item.productId,
-          undoDeltaSign*n(item.qty),
-          'loan_return_cancel',
-          'loan_return_cancel',
-          event.id,
-          `${loan.person} 撤销归还 ${loan.loanNo} · 原归还记录 ${event.id}`,
-          cancelledAt
-        );
-      }
-
-      event.status='cancelled';
-      event.cancelledAt=cancelledAt;
-      event.cancelReason='归还录入错误，已撤销并回退库存';
-      recomputeReturnedQty(loan);
-      refreshLoanStatus(loan);
-      await dbPut('loans',loan);
-      await writeAudit(
-        'loan.return_cancel',
-        'loan',
-        loan.id,
-        `${loan.loanNo} 撤销归还 ${fmtInt(totalQty)} 件`,
-        null,
-        {eventId:event.id,cancelledAt,items,effect:loan.type==='borrow'?'inventory_in':'inventory_out'}
-      );
+      // v4.7.9: 撤销归还和库存回滚放在同一个本机 IndexedDB 事务里。
+      const live=await dbGet('loans',loanId);if(!live)throw new Error('调借单已不存在');
+      const active=(live.returns||[]).find(e=>String(e.id)===String(eventId));
+      if(!active||active.status==='cancelled')throw new Error('归还状态已变更，请重新打开');
+      const updatedAt=live.updatedAt||'',cancelledAt=nowISO();
+      active.status='cancelled';active.cancelledAt=cancelledAt;
+      active.cancelReason='归还录入错误，已撤销并回退库存';
+      recomputeReturnedQty(live);refreshLoanStatus(live);live.updatedAt=nowISO();
+      const changes=items.map(item=>({
+        productId:item.productId,delta:undoDeltaSign*n(item.qty),type:'loan_return_cancel',
+        refType:'loan_return_cancel',refId:event.id,
+        note:`${live.person} 撤销归还 ${live.loanNo} · 原归还记录 ${event.id}`,createdAt:cancelledAt
+      }));
+      await window.MocuiAtomic479.commit({label:`撤销归还 ${live.loanNo}`,
+        moves:changes,writes:[{store:'loans',data:live,expectedUpdatedAt:updatedAt}],
+        audit:[{action:'loan.return_cancel',entityType:'loan',entityId:live.id,
+          summary:`${live.loanNo} 撤销归还 ${fmtInt(totalQty)} 件`,
+          after:{eventId:event.id,cancelledAt,items,effect:live.type==='borrow'?'inventory_in':'inventory_out'}}]
+      });
       showToast(loan.type==='borrow'?'归还已撤销，库存已恢复增加':'归还已撤销，库存已扣回');
-      await openLoanDetail(loan.id);
+      await openLoanDetail(live.id);
     }).catch(err=>showToast(err?.message||'撤销归还失败，请重试'));
   }
   window.cancelLoanReturnEvent=cancelLoanReturnEvent;

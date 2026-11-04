@@ -285,16 +285,12 @@ async function nextLoanNo(){
 }
 
 async function adjustStock(productId, delta, type, refType, refId, note='', createdAt=nowISO()){
-  const p=await dbGet('products',productId); if(!p) throw new Error('商品不存在');
-  // Idempotency guard: the same business reference may never change the same product stock twice.
+  // v4.7.9: 任何直接库存调整也必须让库存和流水在同一数据库事务内完成。
+  // 对旧版已存在的相同业务引用保持幂等，不再重复执行。
   const existing=await stockMoveExists(productId,type,refType,refId);
-  if(existing)return p;
-  const before=n(p.stock), after=before+n(delta);
-  if(after<0) throw new Error(`${p.name} 库存不足，当前库存 ${before}`);
-  p.stock=after; p.updatedAt=nowISO(); await dbPut('products',p);
-  await dbPut('stockMoves',{id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type,qtyChange:n(delta),beforeStock:before,afterStock:after,refType,refId,note,createdAt});
-  await writeAudit(`stock.${type}`,'product',p.id,`${p.name} 库存 ${fmtInt(before)} → ${fmtInt(after)}`,{stock:before},{stock:after,refType,refId,note});
-  return p;
+  if(existing)return dbGet('products',productId);
+  await window.MocuiAtomic479.commit({label:'调整库存',moves:[{productId,delta,type,refType,refId,note,createdAt}],audit:[{action:`stock.${type}`,entityType:'product',entityId:productId,summary:`库存 ${delta>=0?'+':''}${delta} · ${note}`} ]});
+  return dbGet('products',productId);
 }
 async function validateStock(items, direction=-1){
   for(const item of items){
@@ -306,8 +302,8 @@ async function recordStockReference(productId,type,refType,refId,note='',created
   const p=await dbGet('products',productId);if(!p)throw new Error('商品不存在');
   const existing=await stockMoveExists(productId,type,refType,refId);
   if(existing)return p;
-  await dbPut('stockMoves',{id:uid('move'),productId:p.id,productCode:p.code,productName:p.name,type,qtyChange:0,beforeStock:n(p.stock),afterStock:n(p.stock),refType,refId,note,createdAt});
-  return p;
+  await window.MocuiAtomic479.commit({label:'关联库存流水',moves:[{productId,delta:0,type,refType,refId,note,createdAt}]});
+  return dbGet('products',productId);
 }
 
 function dateRange(key, customStart, customEnd){
@@ -362,7 +358,7 @@ function loanItemReturnedQty(loan,item){
 }
 function loanItemSoldQty(loan,item){
   if(item && item.soldQty!==undefined) return Math.min(n(item.qty),Math.max(0,n(item.soldQty)));
-  return (loan?.saleEvents||[]).filter(e=>e.status!=='cancelled').reduce((sum,event)=>sum+n((event.items||[]).find(x=>x.productId===item?.productId)?.qty),0);
+  return (loan?.saleEvents||[]).filter(e=>e.status!=='cancelled').reduce((sum,event)=>sum+(event.items||[]).reduce((partSum,x)=>partSum+(String(x?.productId)===String(item?.productId)?Math.max(0,n(x.qty)):0),0),0);
 }
 function loanItemRemaining(loan,item){ return Math.max(0,n(item?.qty)-loanItemReturnedQty(loan,item)-loanItemSoldQty(loan,item)); }
 function loanRemainingQty(loan){ return (loan?.items||[]).reduce((sum,item)=>sum+loanItemRemaining(loan,item),0); }
@@ -908,8 +904,24 @@ function openManualStock(p,direction){
   openModal(direction>0?'商品入库':'商品出库',`<form id="manualStockForm"><div class="notice ${direction>0?'success':'warn'}">${esc(p.name)}　当前库存：${fmtInt(p.stock)}</div><div class="form-group"><label class="form-label">数量</label><input class="input" name="qty" type="number" min="0.01" step="0.01" required></div><div class="form-group"><label class="form-label">备注</label><textarea class="textarea" name="note" placeholder="如：采购入库、退货、损耗等"></textarea></div><button class="btn block" type="submit">确认${direction>0?'入库':'出库'}</button></form>`,{onOpen:()=>{$('#manualStockForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),qty=n(fd.get('qty'));try{await adjustStock(p.id,direction*qty,direction>0?'stock_in':'stock_out','manual',uid('manual'),String(fd.get('note')));closeModal();showToast('库存已更新');navigate('product-detail',{id:p.id});}catch(err){showToast(err.message);}};}});
 }
 function openSingleStocktake(p){
-  openModal('商品盘点',`<form id="singleStockForm"><div class="notice warn">账面库存：${fmtInt(p.stock)}</div><div class="form-group"><label class="form-label">实际盘点数量</label><input class="input" name="counted" type="number" min="0" step="0.01" value="${n(p.stock)}" required></div><div class="form-group"><label class="form-label">盘点备注</label><textarea class="textarea" name="note"></textarea></div><button class="btn block" type="submit">确认盘点</button></form>`,{onOpen:()=>{$('#singleStockForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),counted=n(fd.get('counted')),delta=counted-n(p.stock),ref=uid('stocktake');if(delta)await adjustStock(p.id,delta,'stocktake','stocktake',ref,String(fd.get('note')));await dbPut('stocktakes',{id:ref,date:nowISO(),items:[{productId:p.id,productName:p.name,bookQty:n(p.stock),countedQty:counted,difference:delta}],note:String(fd.get('note')),createdAt:nowISO()});closeModal();showToast('盘点已保存');navigate('product-detail',{id:p.id});};}});
+  openModal('商品盘点',`<form id="singleStockForm"><div class="notice warn">账面库存：${fmtInt(p.stock)}</div><div class="form-group"><label class="form-label">实际盘点数量</label><input class="input" name="counted" type="number" min="0" step="0.01" value="${n(p.stock)}" required></div><div class="form-group"><label class="form-label">盘点备注</label><textarea class="textarea" name="note"></textarea></div><button class="btn block" type="submit">确认盘点</button></form>`,{onOpen:()=>{$('#singleStockForm').onsubmit=async e=>{
+    e.preventDefault();const form=e.currentTarget,btn=form.querySelector('button[type="submit"]');if(btn?.dataset.submitting==='1')return;
+    const raw=String(new FormData(form).get('counted')??'').trim(),counted=Number(raw);
+    if(!raw||!Number.isFinite(counted)||counted<0){showToast('请输入有效的实际库存数量');return;}
+    const note=String(new FormData(form).get('note')||''),delta=Math.round((counted-n(p.stock))*10000)/10000,ref=form.dataset.coreRef||(form.dataset.coreRef=uid('stocktake'));
+    setCoreButtonBusy(btn,true,'正在保存盘点…','确认盘点');
+    try{
+      const stamp=nowISO();await window.MocuiAtomic479.commit({label:'单件库存盘点',
+        moves:delta?[{productId:p.id,delta,type:'stocktake',refType:'stocktake',refId:ref,note,createdAt:stamp,expectedStock:n(p.stock)}]:[],
+        writes:[{store:'stocktakes',data:{id:ref,date:stamp,items:[{productId:p.id,productName:p.name,bookQty:n(p.stock),countedQty:counted,difference:delta}],note,status:'committed',coreVersion:2,createdAt:stamp,updatedAt:stamp},absent:true}],
+        audit:[{action:'stocktake.commit',entityType:'stocktake',entityId:ref,summary:`盘点 ${p.name}：${fmtInt(n(p.stock))} → ${fmtInt(counted)}`}]
+      });
+      closeModal();showToast('盘点已保存');navigate('product-detail',{id:p.id});
+    }catch(err){showToast(err?.message||'盘点保存失败，库存未改变');}
+    finally{if(btn&&document.body.contains(btn))setCoreButtonBusy(btn,false,'','确认盘点');}
+  };}});
 }
+
 function openDateRangePicker(callback){
   openModal('自定义时间',`<div class="form-row"><div class="form-group"><label class="form-label">开始日期</label><input id="customStart" class="input" type="date"></div><div class="form-group"><label class="form-label">结束日期</label><input id="customEnd" class="input" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div><button id="applyCustomRange" class="btn block">确定</button>`,{onOpen:()=>{$('#applyCustomRange').onclick=()=>{const s=$('#customStart').value,e=$('#customEnd').value;if(!s||!e){showToast('请选择开始和结束日期');return;}closeModal();callback(s,e);};}});
 }
@@ -919,7 +931,7 @@ function openDateRangePicker(callback){
 const ACCESSORY_LEDGER_ID='accessoryInventoryV1';
 function normalizeAccessoryLedger(row){
   const x=row&&typeof row==='object'?row:{};
-  return {id:ACCESSORY_LEDGER_ID,version:1,items:Array.isArray(x.items)?x.items:[],moves:Array.isArray(x.moves)?x.moves:[],updatedAt:x.updatedAt||''};
+  return {id:ACCESSORY_LEDGER_ID,version:1,items:Array.isArray(x.items)?x.items:[],moves:Array.isArray(x.moves)?x.moves:[],updatedAt:x.updatedAt||'',__mocuiAtomicRevision:Number(x.__mocuiAtomicRevision||0)};
 }
 async function getAccessoryLedger(){return normalizeAccessoryLedger(await dbGet('settings',ACCESSORY_LEDGER_ID));}
 async function putAccessoryLedger(ledger){ledger=normalizeAccessoryLedger(ledger);ledger.updatedAt=nowISO();await dbPut('settings',ledger);return ledger;}
@@ -967,6 +979,34 @@ async function restoreAccessorySale(sale){
   }
   await putAccessoryLedger(ledger);
 }
+
+// v4.7.9: 配饰库存是 settings 记录，须与销售单及商品库存同一事务提交。
+function planAccessoryLedger479(ledger,usages,mode,sale){
+  if(!(usages||[]).length)return null;
+  const copy=structuredClone(ledger),byId=new Map(copy.items.map(i=>[String(i.id),i]));
+  const qtyMap=new Map();
+  for(const u of usages){
+    const id=String(u.accessoryId||'');if(!id||n(u.qty)<=0)throw new Error('配饰数量必须大于零');
+    const a=byId.get(id);if(!a||a.archived)throw new Error(`配饰 ${u.name||id} 不存在或已停用`);
+    qtyMap.set(id,(qtyMap.get(id)||0)+n(u.qty));
+  }
+  for(const [id,qty] of qtyMap){
+    const a=byId.get(id),refId=accessoryRefId(sale.id,id),last=lastAccessorySaleMove(copy,id,refId);
+    if(mode==='sale'&&last)throw new Error('配饰销售记录已存在，已阻止重复扣减');
+    if(mode==='cancel'&&last?.type!=='sale')throw new Error('配饰撤销记录不一致，请先进行数据诊断');
+    if(mode==='restore'&&last?.type!=='sale_cancel')throw new Error('配饰恢复记录不一致，请先进行数据诊断');
+    const delta=mode==='cancel'?qty:-qty,before=n(a.stock),after=Math.round((before+delta)*10000)/10000;
+    if(after<0)throw new Error(`${a.name} 配饰库存不足`);
+    a.stock=after;a.updatedAt=nowISO();
+    copy.moves.push({id:uid('accmove'),accessoryId:id,sku:a.sku||'',name:a.name,type:mode==='cancel'?'sale_cancel':mode==='restore'?'sale_restore':'sale',qtyChange:delta,beforeStock:before,afterStock:after,unitCost:n((usages||[]).find(u=>String(u.accessoryId)===id)?.unitCost||a.unitCost),refType:'sale',refId,note:`${mode==='cancel'?'撤销':mode==='restore'?'恢复':''}销售单 ${sale.orderNo}`,createdAt:nowISO()});
+  }
+  copy.updatedAt=nowISO();
+  return{store:'settings',data:copy,expectedUpdatedAt:ledger.updatedAt||''};
+}
+function stockMoves479(items,sign,type,refType,refId,note,createdAt=nowISO()){
+  return(items||[]).map(i=>({productId:i.productId,delta:sign*n(i.qty),type,refType,refId,note,createdAt}));
+}
+
 function accessoryUsageRowsHTML(d){
   const rows=d.accessoryUsages||[];
   return rows.length?rows.map((u,idx)=>`<div class="list-item accessory-sale-row" data-index="${idx}"><div class="item-main"><div class="item-title">${esc(u.name)}</div><div class="item-meta">${esc(u.sku||'')} · 库存 ${fmtInt(u.stock)} · 成本 ${fmtMoney(u.unitCost)}/${esc(u.unit||'件')}</div></div><div style="width:78px"><input class="mini-input accessory-sale-qty" type="number" min="0.01" max="${n(u.stock)}" step="0.01" value="${n(u.qty)}"></div><button class="btn small danger remove-accessory-sale" type="button">删除</button></div>`).join(''):emptyState('◇','未选择库存配饰','金扣、珠子等高价值配饰可从库存选择；低价值绳子/包装直接填成本。');
@@ -1081,10 +1121,6 @@ async function saveSale(){
     }
     const businessDate=String(d.createdAt||'').slice(0,10)||localDateKey();
     const createdAt=new Date(d.createdAt).toISOString();
-    for(const i of d.items){
-      await adjustStock(i.productId,-n(i.qty),'sale','sale',id,`销售单 ${orderNo}`,createdAt);
-    }
-    await applyAccessorySale(d.accessoryUsages||[],id,orderNo,createdAt);
     const sale={
       id,orderNo,customerId,customerName,
       items:d.items.map(i=>({...i,qty:n(i.qty),price:n(i.price),costPrice:n(i.costPrice)})),
@@ -1098,8 +1134,9 @@ async function saveSale(){
       inventoryAccessoryCost:accessoryUsageCost(d.accessoryUsages||[]),directAccessoryCost:Math.max(0,n(d.directAccessoryCost)),accessoryCost:accessoryUsageCost(d.accessoryUsages||[])+Math.max(0,n(d.directAccessoryCost)),otherDirectCost:Math.max(0,n(d.otherDirectCost)),
       note:d.note,status:'active',coreVersion:2,businessDate,createdAt,cancelledAt:null,updatedAt:nowISO()
     };
-    await dbPut('sales',sale);
-    await writeAudit('sale.create','sale',sale.id,`${orderNo} · ${sale.customerName||'散客'} · ${fmtMoney(sale.finalAmount)}`,null,sale);
+    const accessoryLedger=(d.accessoryUsages||[]).length?await getAccessoryLedger():null;
+    const accWrite=accessoryLedger?planAccessoryLedger479(accessoryLedger,d.accessoryUsages,'sale',sale):null;
+    await window.MocuiAtomic479.commit({label:`销售单 ${orderNo}`,moves:stockMoves479(d.items,-1,'sale','sale',id,`销售单 ${orderNo}`,createdAt),writes:[{store:'sales',data:sale,absent:true},...(accWrite?[accWrite]:[])],audit:[{action:'sale.create',entityType:'sale',entityId:id,summary:`${orderNo} · ${customerName} · ${fmtMoney(sale.finalAmount)}`} ]});
     appState.saleDraft=null;clearLocalDraft('mocui_sale_core_pending_v1');
     showToast(`开单成功：${orderNo}`);
     navigate('sales',{highlight:id});
@@ -1133,45 +1170,63 @@ function openSaleDetail(s){
   openModal(`销售单 ${s.orderNo}`,`<div class="grid-2"><div class="metric compact"><div class="label">客户</div><div class="value" style="font-size:14px">${esc(s.customerName||'散客')}</div></div><div class="metric compact"><div class="label">状态</div><div class="value" style="font-size:14px">${s.status==='active'?'有效':'已撤销'}</div></div></div>${linked?`<div class="notice success">本单由借调商品售出自动生成，已联通调借、销售、库存流水和统计。<br>来源调借单：${esc(s.sourceLoanNo||'')}</div>`:(s.importedHistorical||s.sourceType==='qinsilk_history')?'<div class="notice warn">这是从秦丝导入的历史销售，只用于报表与查询，不改变当前库存，也不能在这里撤销。</div>':''}<div class="table-wrap" style="margin-top:10px"><table class="table"><thead><tr><th>商品</th><th>颜色</th><th>数量</th><th>单价</th><th>小计</th><th>商品备注</th></tr></thead><tbody>${s.items.map(i=>`<tr><td>${esc(i.productName)}</td><td>${esc(i.color||'')}</td><td>${fmtInt(i.qty)}</td><td>${fmtMoney(i.price)}</td><td>${fmtMoney(n(i.qty)*n(i.price))}</td><td>${esc(i.itemNote||i.productNote||'')}</td></tr>`).join('')}</tbody></table></div><div class="total-box"><div class="total-row"><span>商品金额</span><strong>${fmtMoney(s.subtotal)}</strong></div><div class="total-row"><span>优惠/抹零</span><strong>-${fmtMoney(s.discountAmount)}</strong></div><div class="total-row"><span>本次实收</span><strong>${fmtMoney(s.received)}</strong></div><div class="total-row grand"><span>应收</span><strong>${fmtMoney(s.finalAmount)}</strong></div></div>${(n(s.accessoryCost)||n(s.otherDirectCost)||s.accessoryUsages?.length)?`<div class="notice success"><strong>成本明细</strong><br>商品成本 ${fmtMoney((s.items||[]).reduce((sum,i)=>sum+n(i.costPrice)*n(i.qty),0))} · 配饰成本 ${fmtMoney(s.accessoryCost)} · 其他直接成本 ${fmtMoney(s.otherDirectCost)}<br>${(s.accessoryUsages||[]).length?`库存配饰：${(s.accessoryUsages||[]).map(u=>`${esc(u.name)}×${fmtInt(u.qty)}`).join('、')}<br>`:''}实际毛利 <strong>${fmtMoney(saleGrossProfit(s))}</strong></div>`:''}<div class="notice">开单时间：${fmtDateTime(s.createdAt)}<br>销售备注：${esc(s.note||'无')}</div>${linked&&loanId?`<button id="openLinkedLoan" class="btn secondary block">查看关联调借单</button>`:''}`,{onOpen:()=>{if($('#openLinkedLoan'))$('#openLinkedLoan').onclick=()=>openLoanDetail(loanId);}});
 }
 async function cancelSale(id){
-  const s=await dbGet('sales',id);if(!s||s.status!=='active')return;if(s.importedHistorical||s.sourceType==='qinsilk_history'){showToast('秦丝历史销售不参与库存，不能在这里撤销');return;}if(!await confirmDialog('确定撤销这张销售单？普通销售会恢复仓库库存；借调售出会恢复为借调未处理数量。'))return;
-  try{
-    for(const i of s.items){
+  const initial=await dbGet('sales',id);
+  if(!initial||initial.status!=='active')return;
+  if(initial.importedHistorical||initial.sourceType==='qinsilk_history'){showToast('历史销售不参与库存，不能撤销');return;}
+  if(!await confirmDialog('确定撤销这张销售单？普通销售恢复库存；借调售出恢复为借调未处理数量。'))return;
+  await withCoreActionLock(`sale-cancel-${id}`,null,'',async()=>{
+    const s=await dbGet('sales',id);if(!s||s.status!=='active')throw new Error('销售单状态已更新，请刷新');
+    const originalUpdatedAt=s.updatedAt||'',opId=uid('sale_cycle'),loanMap=new Map(),loanOriginal=new Map(),moves=[];
+    for(const i of s.items||[]){
       if(i.fromLoan&&i.loanId){
-        const l=await dbGet('loans',i.loanId);if(l){
-          l.items=(l.items||[]).map(x=>x.productId===i.productId?{...x,soldQty:Math.max(0,loanItemSoldQty(l,x)-n(i.qty))}:x);
-          l.saleEvents=(l.saleEvents||[]).map(e=>e.saleId===s.id?{...e,status:'cancelled',cancelledAt:nowISO()}:e);refreshLoanStatus(l);await dbPut('loans',l);
-          if(i.loanType==='borrow')await adjustStock(i.productId,n(i.qty),'loan_sale_cancel','sale',s.id,`撤销借调售出 ${s.orderNo}，恢复仓库库存`);
-          else await recordStockReference(i.productId,'loan_sale_cancel','sale',s.id,`撤销借调售出 ${s.orderNo}，商品恢复为借调未处理，仓库库存不重复增加`);
-        }
-      }else await adjustStock(i.productId,n(i.qty),'sale_cancel','sale',s.id,`撤销销售单 ${s.orderNo}`);
+        let loan=loanMap.get(i.loanId);
+        if(!loan){loan=await dbGet('loans',i.loanId);if(!loan)throw new Error('关联调借单不存在，不能自动撤销');loanMap.set(i.loanId,loan);loanOriginal.set(i.loanId,loan.updatedAt||'');}
+        const li=(loan.items||[]).find(x=>String(x.productId)===String(i.productId));if(!li)throw new Error(`${i.productName} 在调借单中不存在`);
+        // 当前 soldQty 是运行中真实值，逐项减少，重复产品明细也要正确累计。
+        const sold=loanItemSoldQty(loan,li);if(sold<n(i.qty))throw new Error(`${i.productName} 已售数量不足，不能撤销`);
+        li.soldQty=Math.max(0,sold-n(i.qty));
+        loan.saleEvents=(loan.saleEvents||[]).map(e=>e.saleId===s.id?{...e,status:'cancelled',cancelledAt:nowISO()}:e);
+        moves.push(...stockMoves479([i],i.loanType==='borrow'?1:0,'loan_sale_cancel','sale',s.id,`撤销借调售出 ${s.orderNo}`).map(x=>({...x,operationId:opId})));
+      }else moves.push(...stockMoves479([i],1,'sale_cancel','sale',s.id,`撤销销售单 ${s.orderNo}`).map(x=>({...x,operationId:opId})));
     }
-    await cancelAccessorySale(s);
-    s.status='cancelled';s.cancelledAt=nowISO();s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.cancel','sale',s.id,`${s.orderNo} 已撤销`,null,{status:s.status,cancelledAt:s.cancelledAt});showToast('销售单已撤销，相关库存和借调记录已同步');renderSales();
-  }catch(err){showToast(err.message);}
+    const writes=[];
+    for(const loan of loanMap.values()){refreshLoanStatus(loan);loan.updatedAt=nowISO();writes.push({store:'loans',data:loan,expectedUpdatedAt:loanOriginal.get(loan.id)});}
+    const cancelledAt=nowISO();s.status='cancelled';s.cancelledAt=cancelledAt;s.updatedAt=cancelledAt;
+    writes.push({store:'sales',data:s,expectedStatus:'active',expectedUpdatedAt:originalUpdatedAt});
+    const acc=(s.accessoryUsages||[]).length?await getAccessoryLedger():null;
+    if(acc)writes.push(planAccessoryLedger479(acc,s.accessoryUsages,'cancel',s));
+    await window.MocuiAtomic479.commit({label:`撤销销售 ${s.orderNo}`,moves,writes,
+      audit:[{action:'sale.cancel',entityType:'sale',entityId:id,summary:`${s.orderNo} 已撤销`,after:{status:'cancelled',cancelledAt}}]});
+    showToast('销售已撤销，库存、流水和调借已一并保存');await renderSales();
+  }).catch(err=>showToast(err?.message||'撤销失败，未改变库存'));
 }
 async function restoreSale(id){
-  const s=await dbGet('sales',id);if(!s||s.status!=='cancelled')return;if(s.importedHistorical||s.sourceType==='qinsilk_history'){showToast('秦丝历史销售不能恢复库存');return;}
-  try{
-    for(const i of s.items){
+  const initial=await dbGet('sales',id);if(!initial||initial.status!=='cancelled')return;
+  if(initial.importedHistorical||initial.sourceType==='qinsilk_history'){showToast('历史销售不能恢复库存');return;}
+  await withCoreActionLock(`sale-restore-${id}`,null,'',async()=>{
+    const s=await dbGet('sales',id);if(!s||s.status!=='cancelled')throw new Error('销售单状态已更新，请刷新');
+    const originalUpdatedAt=s.updatedAt||'',opId=uid('sale_cycle'),loanMap=new Map(),loanOriginal=new Map(),moves=[];
+    for(const i of s.items||[]){
       if(i.fromLoan&&i.loanId){
-        const l=await dbGet('loans',i.loanId);if(!l)throw new Error(`关联调借单不存在：${i.loanNo||''}`);
-        const li=(l.items||[]).find(x=>x.productId===i.productId);if(!li||loanItemRemaining(l,li)<n(i.qty))throw new Error(`${i.productName} 当前借调未处理数量不足，不能恢复销售`);
-        if(i.loanType==='borrow')await validateStock([i],-1);
-      }else await validateStock([i],-1);
+        let loan=loanMap.get(i.loanId);
+        if(!loan){loan=await dbGet('loans',i.loanId);if(!loan)throw new Error('关联调借单不存在，无法恢复销售');loanMap.set(i.loanId,loan);loanOriginal.set(i.loanId,loan.updatedAt||'');}
+        const li=(loan.items||[]).find(x=>String(x.productId)===String(i.productId));
+        if(!li||loanItemRemaining(loan,li)<n(i.qty))throw new Error(`${i.productName} 调借未处理数量不足`);
+        li.soldQty=loanItemSoldQty(loan,li)+n(i.qty);
+        loan.saleEvents=(loan.saleEvents||[]).map(e=>e.saleId===s.id?{...e,status:'active',cancelledAt:null,restoredAt:nowISO()}:e);
+        moves.push(...stockMoves479([i],i.loanType==='borrow'?-1:0,'loan_sale_restore','sale',s.id,`恢复借调售出 ${s.orderNo}`).map(x=>({...x,operationId:opId})));
+      }else moves.push(...stockMoves479([i],-1,'sale_restore','sale',s.id,`恢复销售单 ${s.orderNo}`).map(x=>({...x,operationId:opId})));
     }
-    await validateAccessoryUsages(s.accessoryUsages||[]);
-    for(const i of s.items){
-      if(i.fromLoan&&i.loanId){
-        const l=await dbGet('loans',i.loanId);
-        l.items=(l.items||[]).map(x=>x.productId===i.productId?{...x,soldQty:loanItemSoldQty(l,x)+n(i.qty)}:x);
-        l.saleEvents=(l.saleEvents||[]).map(e=>e.saleId===s.id?{...e,status:'active',cancelledAt:null,restoredAt:nowISO()}:e);refreshLoanStatus(l);await dbPut('loans',l);
-        if(i.loanType==='borrow')await adjustStock(i.productId,-n(i.qty),'loan_sale_restore','sale',s.id,`恢复借调售出 ${s.orderNo}`);
-        else await recordStockReference(i.productId,'loan_sale_restore','sale',s.id,`恢复借调售出 ${s.orderNo}，借出时库存已扣减`);
-      }else await adjustStock(i.productId,-n(i.qty),'sale_restore','sale',s.id,`恢复销售单 ${s.orderNo}`);
-    }
-    await restoreAccessorySale(s);
-    s.status='active';s.cancelledAt=null;s.updatedAt=nowISO();await dbPut('sales',s);await writeAudit('sale.restore','sale',s.id,`${s.orderNo} 已恢复`,null,{status:s.status,updatedAt:s.updatedAt});showToast('销售单已恢复，借调、库存和统计已重新联通');renderSales();
-  }catch(err){showToast(err.message);}
+    const writes=[];
+    for(const loan of loanMap.values()){refreshLoanStatus(loan);loan.updatedAt=nowISO();writes.push({store:'loans',data:loan,expectedUpdatedAt:loanOriginal.get(loan.id)});}
+    s.status='active';s.cancelledAt=null;s.updatedAt=nowISO();
+    writes.push({store:'sales',data:s,expectedStatus:'cancelled',expectedUpdatedAt:originalUpdatedAt});
+    const acc=(s.accessoryUsages||[]).length?await getAccessoryLedger():null;
+    if(acc)writes.push(planAccessoryLedger479(acc,s.accessoryUsages,'restore',s));
+    await window.MocuiAtomic479.commit({label:`恢复销售 ${s.orderNo}`,moves,writes,
+      audit:[{action:'sale.restore',entityType:'sale',entityId:id,summary:`${s.orderNo} 已恢复`,after:{status:'active'}}]});
+    showToast('销售已恢复，库存、流水和调借一并保存');await renderSales();
+  }).catch(err=>showToast(err?.message||'恢复失败，未改变库存'));
 }
 
 async function duplicateSale(id){
@@ -1262,9 +1317,8 @@ async function renderLoanFormModal(){
         saveLocalDraft('mocui_loan_draft_v1',{...d,images:[],items:d.items.map(i=>({...i,image:''})),__coreLoanId:id,__coreLoanNo:loanNo});
         const existing=await dbGet('loans',id);
         if(existing){clearLocalDraft('mocui_loan_draft_v1');closeModal();appState.loanDraft=null;showToast(`调借单已保存：${existing.loanNo||loanNo}`);navigate('loans');return;}
-        for(const i of d.items)await adjustStock(i.productId,(d.type==='borrow'?1:-1)*n(i.qty),d.type==='borrow'?'loan_borrow':'loan_lend','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,createdAt);
         const loan={id,loanNo,type:d.type,person:d.person,date:createdAt,expectedReturnDate:d.expectedReturnDate||addDaysLocal(createdAt,30),note:d.note,images:d.images,items:d.items.map(i=>({...i,qty:n(i.qty),returnedQty:0,soldQty:0})),returns:[],saleEvents:[],status:'active',returnedAt:null,coreVersion:1,createdAt:nowISO(),updatedAt:nowISO()};
-        await dbPut('loans',loan);await writeAudit('loan.create','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,null,loan);
+        await window.MocuiAtomic479.commit({label:`调借单 ${loanNo}`,moves:stockMoves479(d.items,d.type==='borrow'?1:-1,d.type==='borrow'?'loan_borrow':'loan_lend','loan',id,`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`,createdAt),writes:[{store:'loans',data:loan,absent:true}],audit:[{action:'loan.create',entityType:'loan',entityId:id,summary:`${d.person} ${d.type==='borrow'?'调入':'借出'} ${loanNo}`} ]});
         clearLocalDraft('mocui_loan_draft_v1');closeModal();appState.loanDraft=null;showToast('调借单已保存，库存已同步');navigate('loans');
       }catch(err){showToast(err?.message||'调借保存失败，请重试');}
       finally{if(btn&&document.body.contains(btn))setCoreButtonBusy(btn,false,'','保存调借单并同步库存');}
@@ -1315,10 +1369,16 @@ async function openLoanBatchSaleForm(loanId){
       for(const i of picked){const ci=(currentLoan.items||[]).find(x=>x.productId===i.productId);if(!ci||loanItemRemaining(currentLoan,ci)<i.saleQty)throw new Error(`${i.productName} 当前未处理数量不足`);}
       if(currentLoan.type==='borrow')await validateStock(picked.map(i=>({productId:i.productId,productName:i.productName,qty:i.saleQty})),-1);
       let customerId='',customerName=draft.customerName||'散客';if(customerName!=='散客'){const all=await dbAll('customers');let c=all.find(x=>x.name===customerName);if(!c){c={id:uid('cust'),name:customerName,phone:'',note:'借调售出自动创建',createdAt:nowISO(),updatedAt:nowISO()};await dbPut('customers',c);}customerId=c.id;}
+      const originalLoanUpdatedAt479=currentLoan.updatedAt||'';
       const saleId=uid('sale'),eventId=uid('loan_sale_event'),orderNo=await nextOrderNo(),createdAt=new Date(draft.date).toISOString();const totals=calcSaleTotals({items:picked.map(i=>({qty:i.saleQty,price:i.price})),discountType:draft.discountType,discountValue:draft.discountValue});
-      const saleItems=[];for(const i of picked){const ci=(currentLoan.items||[]).find(x=>x.productId===i.productId),p=pmap.get(i.productId)||{};if(currentLoan.type==='borrow')await adjustStock(i.productId,-i.saleQty,'loan_sale','sale',saleId,`借调批量售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt);else await recordStockReference(i.productId,'loan_sale','sale',saleId,`借调批量售出 ${orderNo} · 来源 ${currentLoan.loanNo}；借出时库存已扣减，本次不重复扣减`,createdAt);saleItems.push({productId:i.productId,productName:i.productName,productCode:i.productCode,color:ci.color||p.color,qty:i.saleQty,price:i.price,costPrice:n(ci.costPrice||p.costPrice),image:ci.image||p.image,stock:n(p.stock),productNote:ci.productNote||p.note||'',fromLoan:true,loanId:currentLoan.id,loanNo:currentLoan.loanNo,loanPerson:currentLoan.person,loanType:currentLoan.type,loanSaleEventId:eventId});}
-      const sale={id:saleId,orderNo,customerId,customerName,items:saleItems,subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,businessDate:String(draft.date||'').slice(0,10)||localDateKey(createdAt),createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);await writeAudit('sale.loan_batch_create','sale',sale.id,`${orderNo} · 来源 ${currentLoan.loanNo}`,null,sale);
-      currentLoan.items=(currentLoan.items||[]).map(x=>{const hit=picked.find(i=>i.productId===x.productId);return hit?{...x,soldQty:loanItemSoldQty(currentLoan,x)+hit.saleQty}:x;});currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,status:'active',items:saleItems.map(i=>({productId:i.productId,productName:i.productName,productCode:i.productCode,color:i.color,qty:i.qty,price:i.price})),createdAt:nowISO()}];refreshLoanStatus(currentLoan);await dbPut('loans',currentLoan);await writeAudit('loan.batch_sale','loan',currentLoan.id,`${currentLoan.loanNo} 批量售出 ${saleItems.length} 种`,null,{saleId,orderNo,items:saleItems.map(i=>({productId:i.productId,qty:i.qty}))});closeModal();showToast(`已生成销售单 ${orderNo}`);await openLoanDetail(currentLoan.id);
+      const saleItems=[];for(const i of picked){const ci=(currentLoan.items||[]).find(x=>x.productId===i.productId),p=pmap.get(i.productId)||{};saleItems.push({productId:i.productId,productName:i.productName,productCode:i.productCode,color:ci.color||p.color,qty:i.saleQty,price:i.price,costPrice:n(ci.costPrice||p.costPrice),image:ci.image||p.image,stock:n(p.stock),productNote:ci.productNote||p.note||'',fromLoan:true,loanId:currentLoan.id,loanNo:currentLoan.loanNo,loanPerson:currentLoan.person,loanType:currentLoan.type,loanSaleEventId:eventId});}
+      const sale={id:saleId,orderNo,customerId,customerName,items:saleItems,subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,businessDate:String(draft.date||'').slice(0,10)||localDateKey(createdAt),createdAt,cancelledAt:null,updatedAt:nowISO()};
+      currentLoan.items=(currentLoan.items||[]).map(x=>{const hit=picked.find(i=>i.productId===x.productId);return hit?{...x,soldQty:loanItemSoldQty(currentLoan,x)+hit.saleQty}:x;});currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,status:'active',items:saleItems.map(i=>({productId:i.productId,productName:i.productName,productCode:i.productCode,color:i.color,qty:i.qty,price:i.price})),createdAt:nowISO()}];refreshLoanStatus(currentLoan);currentLoan.updatedAt=nowISO();
+      await window.MocuiAtomic479.commit({label:`借调批量售出 ${orderNo}`,
+        moves:stockMoves479(saleItems,currentLoan.type==='borrow'?-1:0,'loan_sale','sale',saleId,`借调批量售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt),
+        writes:[{store:'sales',data:sale,absent:true},{store:'loans',data:currentLoan,expectedUpdatedAt:originalLoanUpdatedAt479}],
+        audit:[{action:'sale.loan_batch_create',entityType:'sale',entityId:saleId,summary:`${orderNo} · 来源 ${currentLoan.loanNo}`},{action:'loan.batch_sale',entityType:'loan',entityId:currentLoan.id,summary:`${currentLoan.loanNo} 批量售出 ${saleItems.length} 种`}]
+      });closeModal();showToast(`已生成销售单 ${orderNo}`);await openLoanDetail(currentLoan.id);
     }catch(err){showToast(err?.message||'批量售出失败');if(btn&&document.body.contains(btn))setCoreButtonBusy(btn,false,'','确认多件售出并生成销售单');}}
   }});
 }
@@ -1342,11 +1402,16 @@ async function openLoanSaleForm(loanId,productId){
       const currentLoan=await dbGet('loans',l.id),currentItem=(currentLoan.items||[]).find(x=>x.productId===productId),currentRemaining=currentItem?loanItemRemaining(currentLoan,currentItem):0;if(currentRemaining<draft.qty)throw new Error(`当前只剩 ${fmtInt(currentRemaining)} 件可售出`);
       if(currentLoan.type==='borrow')await validateStock([{productId,productName:p.name,qty:draft.qty}],-1);
       let customerId=draft.customerId||'',customerName=draft.customerName||'散客';if(customerName!=='散客'&&!customerId){const all=await dbAll('customers');let c=all.find(x=>x.name===customerName);if(!c){c={id:uid('cust'),name:customerName,phone:'',note:'借调售出自动创建',createdAt:nowISO(),updatedAt:nowISO()};await dbPut('customers',c);}customerId=c.id;}
+      const originalLoanUpdatedAt479=currentLoan.updatedAt||'';
       const saleId=draft.__saleId,eventId=draft.__eventId,orderNo=draft.__orderNo,createdAt=new Date(draft.date).toISOString();const totals=calcSaleTotals({items:[{qty:draft.qty,price:draft.price}],discountType:draft.discountType,discountValue:draft.discountValue});
-      if(currentLoan.type==='borrow')await adjustStock(productId,-draft.qty,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt);else await recordStockReference(productId,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}；借出时库存已扣减，本次不重复扣减`,createdAt);
       const saleItem={productId:p.id,productName:p.name,productCode:p.code,color:currentItem.color||p.color,qty:draft.qty,price:draft.price,costPrice:n(currentItem.costPrice||p.costPrice),image:currentItem.image||p.image,stock:n(p.stock),productNote:currentItem.productNote||p.note||'',itemNote:draft.itemNote,fromLoan:true,loanId:currentLoan.id,loanNo:currentLoan.loanNo,loanPerson:currentLoan.person,loanType:currentLoan.type,loanSaleEventId:eventId};
-      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,businessDate:String(draft.date||'').slice(0,10)||localDateKey(createdAt),createdAt,cancelledAt:null,updatedAt:nowISO()};await dbPut('sales',sale);await writeAudit('sale.loan_create','sale',sale.id,`${orderNo} · 来源 ${currentLoan.loanNo}`,null,sale);
-      const loanSaleEventExists=(currentLoan.saleEvents||[]).some(e=>e.id===eventId||e.saleId===saleId);if(!loanSaleEventExists){currentLoan.items=(currentLoan.items||[]).map(x=>x.productId===productId?{...x,soldQty:loanItemSoldQty(currentLoan,x)+draft.qty}:x);currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,itemNote:draft.itemNote,status:'active',items:[{productId:p.id,productName:p.name,productCode:p.code,color:saleItem.color,qty:draft.qty,price:draft.price}],createdAt:nowISO()}];}refreshLoanStatus(currentLoan);await dbPut('loans',currentLoan);await writeAudit('loan.sale','loan',currentLoan.id,`${currentLoan.loanNo} 售出 ${p.name} × ${fmtInt(draft.qty)}`,null,{saleId,orderNo,productId,qty:draft.qty});
+      const sale={id:saleId,orderNo,customerId,customerName,items:[saleItem],subtotal:totals.subtotal,discountType:draft.discountType,discountValue:draft.discountValue,discountAmount:totals.discountAmount,finalAmount:totals.finalAmount,received:draft.received===''?totals.finalAmount:n(draft.received),note:draft.note,status:'active',sourceType:'loan_sale',sourceLoanId:currentLoan.id,sourceLoanNo:currentLoan.loanNo,businessDate:String(draft.date||'').slice(0,10)||localDateKey(createdAt),createdAt,cancelledAt:null,updatedAt:nowISO()};
+      const loanSaleEventExists=(currentLoan.saleEvents||[]).some(e=>e.id===eventId||e.saleId===saleId);if(!loanSaleEventExists){currentLoan.items=(currentLoan.items||[]).map(x=>x.productId===productId?{...x,soldQty:loanItemSoldQty(currentLoan,x)+draft.qty}:x);currentLoan.saleEvents=[...(currentLoan.saleEvents||[]),{id:eventId,saleId,orderNo,date:createdAt,customerId,customerName,note:draft.note,itemNote:draft.itemNote,status:'active',items:[{productId:p.id,productName:p.name,productCode:p.code,color:saleItem.color,qty:draft.qty,price:draft.price}],createdAt:nowISO()}];}refreshLoanStatus(currentLoan);currentLoan.updatedAt=nowISO();
+      await window.MocuiAtomic479.commit({label:`借调售出 ${orderNo}`,
+        moves:stockMoves479([saleItem],currentLoan.type==='borrow'?-1:0,'loan_sale','sale',saleId,`借调售出 ${orderNo} · 来源 ${currentLoan.loanNo}`,createdAt),
+        writes:[{store:'sales',data:sale,absent:true},{store:'loans',data:currentLoan,expectedUpdatedAt:originalLoanUpdatedAt479}],
+        audit:[{action:'sale.loan_create',entityType:'sale',entityId:saleId,summary:`${orderNo} · 来源 ${currentLoan.loanNo}`},{action:'loan.sale',entityType:'loan',entityId:currentLoan.id,summary:`${currentLoan.loanNo} 售出 ${p.name} × ${fmtInt(draft.qty)}`}]
+      });
       closeModal();showToast(`已售出并生成销售单 ${orderNo}`);await openLoanDetail(currentLoan.id);
     }catch(err){showToast(err.message);if(submitBtn&&document.body.contains(submitBtn))setCoreButtonBusy(submitBtn,false,'','确认售出并生成销售单');}};
   }});
@@ -1371,9 +1436,15 @@ async function openLoanReturnForm(loanId,productId=null,all=false,returnToDraft=
     $('#loanReturnForm').onsubmit=async e=>{e.preventDefault();sync();const items=draft.items.filter(i=>n(i.returnQty)>0).map(i=>({productId:i.productId,productName:i.productName,productCode:i.productCode,color:i.color,qty:n(i.returnQty)}));if(!items.length){showToast('请填写本次归还数量');return;}if(!draft.images.length){showToast('每次还货至少需要拍摄或上传 1 张图片留底');return;}for(const i of draft.items){if(n(i.returnQty)>n(i.remainingQty)){showToast(`${i.productName} 归还数量超过未还数量`);return;}}if(!draft.date||Number.isNaN(new Date(draft.date).getTime())){showToast('请选择有效还货时间');return;}const submitBtn=$('#saveReturn');if(submitBtn?.dataset.submitting==='1')return;setCoreButtonBusy(submitBtn,true,'正在保存还货…','保存本次还货并同步库存');draft.__eventId=draft.__eventId||uid('return');try{
       if(l.type==='borrow')await validateStock(items.map(i=>({...i,qty:i.qty})),-1);
       const eventId=draft.__eventId,eventDate=new Date(draft.date).toISOString(),eventNo=(l.returns||[]).length+1;
-      for(const i of items)await adjustStock(i.productId,(l.type==='borrow'?-1:1)*n(i.qty),'loan_return','loan_return',eventId,`${l.person} 第${eventNo}次归还 ${l.loanNo}`,eventDate);
-      const returnEventExists=(l.returns||[]).some(e=>e.id===eventId);if(!returnEventExists){l.items=(l.items||[]).map(item=>{const back=items.find(x=>x.productId===item.productId);return {...item,returnedQty:loanItemReturnedQty(l,item)+n(back?.qty)};});l.returns=[...(l.returns||[]),{id:eventId,date:eventDate,note:draft.note,images:draft.images,items,createdAt:nowISO()}];}
-      refreshLoanStatus(l);if(l.status==='returned')l.returnedAt=eventDate;await dbPut('loans',l);await writeAudit('loan.return','loan',l.id,`${l.loanNo} 本次归还 ${fmtInt(items.reduce((sum,x)=>sum+n(x.qty),0))} 件`,null,{eventId,date:eventDate,items});const finished=!loanIsOpen(l);closeModal();showToast(finished?'本张调借单已处理完成，库存已同步':'本次还货已保存，剩余继续挂账');if(returnToDraft&&appState.loanDraft)await renderLoanFormModal();else await openLoanDetail(l.id);
+      const live=await dbGet('loans',l.id);if(!live)throw new Error('调借单已不存在');
+      if((live.returns||[]).some(e=>e.id===eventId)){showToast('本次归还已保存，请勿重复提交');closeModal();await openLoanDetail(l.id);return;}
+      for(const i of items){const li=(live.items||[]).find(x=>String(x.productId)===String(i.productId));if(!li||loanItemRemaining(live,li)<n(i.qty))throw new Error(`${i.productName} 当前未还数量不足，请重新打开`);}
+      const originalUpdatedAt=live.updatedAt||'';
+      live.items=(live.items||[]).map(item=>{const back=items.filter(x=>String(x.productId)===String(item.productId)).reduce((sum,x)=>sum+n(x.qty),0);return {...item,returnedQty:loanItemReturnedQty(live,item)+back};});
+      live.returns=[...(live.returns||[]),{id:eventId,date:eventDate,note:draft.note,images:draft.images,items,createdAt:nowISO()}];
+      refreshLoanStatus(live);if(live.status==='returned')live.returnedAt=eventDate;live.updatedAt=nowISO();
+      await window.MocuiAtomic479.commit({label:`归还 ${live.loanNo}`,moves:stockMoves479(items,live.type==='borrow'?-1:1,'loan_return','loan_return',eventId,`${live.person} 第${eventNo}次归还 ${live.loanNo}`,eventDate),writes:[{store:'loans',data:live,expectedUpdatedAt:originalUpdatedAt}],audit:[{action:'loan.return',entityType:'loan',entityId:live.id,summary:`${live.loanNo} 本次归还 ${fmtInt(items.reduce((sum,x)=>sum+n(x.qty),0))} 件`,after:{eventId,date:eventDate,items}}]});
+      const finished=!loanIsOpen(live);closeModal();showToast(finished?'本张调借单已处理完成，库存已同步':'本次还货已保存，剩余继续挂账');if(returnToDraft&&appState.loanDraft)await renderLoanFormModal();else await openLoanDetail(live.id);
     }catch(err){showToast(err.message);if(submitBtn&&document.body.contains(submitBtn))setCoreButtonBusy(submitBtn,false,'','保存本次还货并同步库存');}};
   }});
 }
@@ -2093,21 +2164,34 @@ async function renderStocktake(){
   setHeader('库存盘点','批量录入实际库存');
   const products=(await dbAll('products')).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
   $('#main').innerHTML=`<div class="notice warn">只需修改实际数量不同的商品。保存后系统会自动生成盘盈或盘亏库存流水。</div><div class="toolbar"><div class="search"><input id="stocktakeSearch" placeholder="搜索商品"></div></div><form id="stocktakeForm"><div id="stocktakeList" class="list"></div><div class="form-group" style="margin-top:12px"><label class="form-label">盘点备注</label><textarea id="stocktakeNote" class="textarea"></textarea></div><button class="btn block" type="submit">保存本次盘点</button></form>`;
-  const draw=()=>{const q=$('#stocktakeSearch').value.trim().toLowerCase(),rows=products.filter(p=>!q||[p.name,p.code,p.color].some(v=>String(v||'').toLowerCase().includes(q)));$('#stocktakeList').innerHTML=rows.map(p=>`<div class="list-item stocktake-row" data-id="${p.id}">${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">账面库存 ${fmtInt(p.stock)}</div></div><div style="width:90px"><input class="input counted" type="number" min="0" step="0.01" value="${n(p.stock)}"></div></div>`).join('')||emptyState('✓','没有商品');};draw();$('#stocktakeSearch').oninput=draw;
+  // 在搜索、筛选重新绘制列表时保留未提交的修改；最后统一核对所有已修改商品。
+  const editedCounts=new Map(),productMap=new Map(products.map(x=>[String(x.id),x]));
+  const draw=()=>{const q=$('#stocktakeSearch').value.trim().toLowerCase(),rows=products.filter(p=>!q||[p.name,p.code,p.color].some(v=>String(v||'').toLowerCase().includes(q)));
+    $('#stocktakeList').innerHTML=rows.map(p=>`<div class="list-item stocktake-row" data-id="${p.id}">${imageThumb(p)}<div class="item-main"><div class="item-title">${esc(p.name)}</div><div class="item-meta">账面库存 ${fmtInt(p.stock)}</div></div><div style="width:90px"><input class="input counted" type="number" min="0" step="0.01" value="${esc(editedCounts.has(String(p.id))?editedCounts.get(String(p.id)):String(n(p.stock)))}"></div></div>`).join('')||emptyState('✓','没有商品');
+    $$('.stocktake-row .counted').forEach(input=>input.addEventListener('input',()=>{editedCounts.set(String(input.closest('.stocktake-row').dataset.id),input.value);}));
+  };draw();$('#stocktakeSearch').oninput=draw;
   $('#stocktakeForm').onsubmit=async e=>{
     e.preventDefault();const form=e.currentTarget,btn=e.submitter||$('button[type="submit"]',form);if(btn?.dataset.submitting==='1')return;
     const ref=form.dataset.coreRef||(form.dataset.coreRef=uid('stocktake')),note=$('#stocktakeNote').value,items=[];
-    for(const el of $$('.stocktake-row')){const p=products.find(x=>x.id===el.dataset.id),counted=n($('.counted',el).value),delta=counted-n(p.stock);if(delta)items.push({productId:p.id,productName:p.name,bookQty:n(p.stock),countedQty:counted,difference:delta});}
+    for(const [productId,rawValue]of editedCounts){
+      const p=productMap.get(productId),raw=String(rawValue??'').trim(),counted=Number(raw);
+      if(!p||!raw||!Number.isFinite(counted)||counted<0){showToast('盘点数量有空值或异常，请检查已修改的商品');return;}
+      const delta=Math.round((counted-n(p.stock))*10000)/10000;
+      if(delta)items.push({productId:p.id,productName:p.name,bookQty:n(p.stock),countedQty:counted,difference:delta});
+    }
     if(!items.length){showToast('没有库存差异');return;}
     setCoreButtonBusy(btn,true,'正在保存盘点…','保存本次盘点');
     try{
-      const existing=await dbGet('stocktakes',ref);if(existing?.status==='committed'){showToast('这次盘点已经保存');navigate('dashboard');return;}
-      await dbPut('stocktakes',{id:ref,date:existing?.date||nowISO(),items,note,status:'pending',coreVersion:1,createdAt:existing?.createdAt||nowISO(),updatedAt:nowISO()});
-      for(const item of items)await adjustStock(item.productId,item.difference,'stocktake','stocktake',ref,note);
-      const saved=await dbGet('stocktakes',ref);saved.status='committed';saved.updatedAt=nowISO();await dbPut('stocktakes',saved);
-      await writeAudit('stocktake.commit','stocktake',ref,`盘点调整 ${items.length} 个商品`,null,{items});
+      const existing=await dbGet('stocktakes',ref);
+      if(existing?.status==='committed'){showToast('这次盘点已经保存');navigate('dashboard');return;}
+      if(existing)throw new Error('发现上次未完成的同编号盘点，请先检查盘点记录');
+      const stamp=nowISO(),moves=items.map(item=>({productId:item.productId,delta:item.difference,type:'stocktake',refType:'stocktake',refId:ref,note,createdAt:stamp,expectedStock:item.bookQty}));
+      await window.MocuiAtomic479.commit({label:'批量库存盘点',moves,
+        writes:[{store:'stocktakes',data:{id:ref,date:stamp,items,note,status:'committed',coreVersion:2,createdAt:stamp,updatedAt:stamp},absent:true}],
+        audit:[{action:'stocktake.commit',entityType:'stocktake',entityId:ref,summary:`盘点调整 ${items.length} 个商品`,after:{items}}]
+      });
       showToast(`盘点完成，调整 ${items.length} 个商品`);navigate('dashboard');
-    }catch(err){showToast(err?.message||'盘点保存失败，请重试');}
+    }catch(err){showToast(err?.message||'盘点保存失败，库存未改变');}
     finally{if(btn&&document.body.contains(btn))setCoreButtonBusy(btn,false,'','保存本次盘点');}
   };
 }
@@ -2311,6 +2395,7 @@ function bindPrimaryNavigation(){
 async function init(){
   setBootStatus('正在读取本机数据…');
   db=await openDB();
+  if(window.MocuiAtomic479)await window.MocuiAtomic479.recover();
   const missingCore=coreHandlerStatus();
   if(missingCore.length){finishBoot();blockForCoreFailure(missingCore);return;}
   await ensureDefaults();

@@ -1,6 +1,6 @@
 'use strict';
 (() => {
-  const VERSION='3.13.0';
+  const VERSION='4.7.9';
   const PERF_DB='mocui_perf_v313';
   const PERF_VERSION=1;
   const PAGE_SIZE=30;
@@ -98,22 +98,22 @@
     const oldPut=window.dbPut,oldAdd=window.dbAdd,oldDelete=window.dbDelete,oldClear=window.dbClear;
     window.dbPut=async function(store,value,...rest){
       const r=await oldPut.call(this,store,value,...rest);
-      if(store==='products')void indexPut(value).catch(()=>metaSet('ready',false));
+      if(store==='products'){void indexPut(value).catch(()=>metaSet('ready',false));window.dispatchEvent(new Event('mocui-product-index-changed'));}
       return r;
     };
     window.dbAdd=async function(store,value,...rest){
       const r=await oldAdd.call(this,store,value,...rest);
-      if(store==='products')void indexPut(value).catch(()=>metaSet('ready',false));
+      if(store==='products'){void indexPut(value).catch(()=>metaSet('ready',false));window.dispatchEvent(new Event('mocui-product-index-changed'));}
       return r;
     };
     window.dbDelete=async function(store,id,...rest){
       const r=await oldDelete.call(this,store,id,...rest);
-      if(store==='products')void indexDelete(id).catch(()=>metaSet('ready',false));
+      if(store==='products'){void indexDelete(id).catch(()=>metaSet('ready',false));window.dispatchEvent(new Event('mocui-product-index-changed'));}
       return r;
     };
     window.dbClear=async function(store,...rest){
       const r=await oldClear.call(this,store,...rest);
-      if(store==='products')void metaSet('ready',false);
+      if(store==='products'){void metaSet('ready',false);window.dispatchEvent(new Event('mocui-product-index-changed'));}
       return r;
     };
     return true;
@@ -172,7 +172,13 @@
     if(metrics[1])metrics[1].textContent=fmtInt(products.reduce((a,p)=>a+Number(p.stock||0),0));
     if(metrics[2])metrics[2].textContent=fmtMoney(products.reduce((a,p)=>a+Number(p.stock||0)*Number(p.costPrice||0),0));
 
-    let selectedCategoryId='__all__',shown=PAGE_SIZE,filtered=[];
+    let shown=PAGE_SIZE;
+    // v4.7.9: 仅记忆本次会话的列表展开量，先恢复列表高度，页面位置恢复才不会卡在第 30 件。
+    try{const st=JSON.parse(sessionStorage.getItem('mocui_v479_product_list')||'null');
+      if(st&&Date.now()-Number(st.at||0)<60*60*1000)shown=Math.max(PAGE_SIZE,Math.min(products.length,Number(st.shown||PAGE_SIZE)));
+    }catch{}
+    let selectedCategoryId='__all__',filtered=[];
+    const rememberShown=()=>{try{sessionStorage.setItem('mocui_v479_product_list',JSON.stringify({shown,at:Date.now()}));}catch{}};
     const selectedLabel=()=>{
       if(selectedCategoryId==='__all__')return '全部分类';
       if(selectedCategoryId==='__uncategorized__')return '未分类';
@@ -190,7 +196,7 @@
       );
       const rows=filtered.slice(0,shown),host=$('#productList');
       host.innerHTML=rows.length?rows.map(p=>productListItem(p,categories)).join(''):emptyState('⌕','没有找到商品','可调整关键词或分类');
-      $$('#productList [data-product-id]').forEach(el=>el.onclick=()=>navigate('product-detail',{id:el.dataset.productId}));
+      $$('#productList [data-product-id]').forEach(el=>el.onclick=()=>{rememberShown();navigate('product-detail',{id:el.dataset.productId});});
       $('#categoryFilterBtn').textContent=selectedLabel();
       const more=$('#productLoadMore');
       if(more){
@@ -201,10 +207,18 @@
     };
 
     draw();
-    $('#productSearch').oninput=()=>{shown=PAGE_SIZE;draw()};
-    $('#stockFilter').onchange=()=>{shown=PAGE_SIZE;draw()};
+    let restored=null;try{restored=JSON.parse(sessionStorage.getItem('mocui_page_state_v469')||'{}')?.products||null;}catch{}
+    const restoreUntil=Date.now()+1700;
+    const onFilter=()=>{
+      const sameRestored=Date.now()<restoreUntil&&restored&&
+        String($('#productSearch')?.value||'')===String(restored.query||'')&&
+        String($('#stockFilter')?.value||'')===String(restored.stock??'in');
+      if(!sameRestored){shown=PAGE_SIZE;rememberShown();}draw();
+    };
+    $('#productSearch').oninput=onFilter;
+    $('#stockFilter').onchange=onFilter;
     $('#categoryFilterBtn').onclick=()=>openCategoryPicker({categories,selectedId:selectedCategoryId,allowAll:true,onSelect:id=>{selectedCategoryId=id;shown=PAGE_SIZE;draw()}});
-    $('#productLoadMore').onclick=()=>{shown+=PAGE_SIZE;draw()};
+    $('#productLoadMore').onclick=()=>{shown+=PAGE_SIZE;rememberShown();draw()};
     $('#batchImport').onclick=openBatchImport;
     $('#manageCategory').onclick=openCategoryManager;
     $('#exportProducts').onclick=async()=>{
@@ -226,18 +240,48 @@
   },25);
   setTimeout(()=>clearInterval(timer),10000);
 
-  // 云端同步完成后不阻塞当前页面；空闲时重建一次轻量索引。
+  // v4.7.9: 同步游标变化不等于商品变化。只比对 v3 journal 中产品 shadow 的哈希。
+  // 销售、调借、审计日志等云端更新不再触发重建 600+ 件商品索引。
+  async function remoteProductSignature(){
+    const db=await new Promise((res,rej)=>{
+      const req=indexedDB.open('mocui_sync_v2',2);
+      req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);
+    });
+    try{
+      if(!db.objectStoreNames.contains('shadow'))return null;
+      const store=db.transaction('shadow','readonly').objectStore('shadow');
+      const range=IDBKeyRange.bound('products:','products:\uffff');
+      const rows=await reqP(store.getAll(range));
+      return rows.map(x=>`${x.key}|${x.hash||''}|${x.deleted?'1':'0'}`).join('\n');
+    }finally{db.close();}
+  }
   let reconcileTimer=null,lastRemoteCursor=null;
   window.addEventListener('cloud-sync-ok',event=>{
-    // 此更新包不覆盖同步引擎，因此以服务端增量游标判断是否需要刷新索引。
-    // 相同游标的空轮询绝不重复全表建索引；发生新同步时在后台延迟重建。
-    const nextCursor=Number(event?.detail?.cursor||0);
-    if(nextCursor>0 && lastRemoteCursor===nextCursor)return;
-    lastRemoteCursor=nextCursor;
+    if(event?.detail?.protocol!=='v3-journal')return;
+    const cursor=Number(event?.detail?.cursor||0);
+    if(cursor>0&&cursor===lastRemoteCursor)return;
+    lastRemoteCursor=cursor;
     clearTimeout(reconcileTimer);
-    reconcileTimer=setTimeout(()=>{
-      rebuildIndex(true).catch(e=>console.warn('[v4.7.7 index sync]',e));
-    },4500);
+    reconcileTimer=setTimeout(async()=>{
+      try{
+        const signature=await remoteProductSignature();
+        if(signature===null)return;
+        const previous=await metaGet('remoteProductSignature479');
+        if(signature===previous)return;
+        await rebuildIndex(true);
+        await metaSet('remoteProductSignature479',signature);
+        window.dispatchEvent(new Event('mocui-product-index-changed'));
+      }catch(e){console.warn('[v4.7.9 remote product index]',e);await metaSet('ready',false).catch(()=>{});}
+    },1800);
+  });
+
+  // 同一 IndexedDB 业务事务绕过旧 dbPut 钩子，事务完成后显式更新轻量索引。
+  window.addEventListener('mocui-atomic-commit',event=>{
+    const rows=event?.detail?.products||[];
+    if(!rows.length)return;
+    void Promise.all(rows.map(indexPut)).then(()=>{
+      window.dispatchEvent(new Event('mocui-product-index-changed'));
+    }).catch(async e=>{console.warn('[v4.7.9 atomic index]',e);await metaSet('ready',false).catch(()=>{});});
   });
 
   // 首次安装在浏览器空闲时建立索引，用户不进入商品页也可以预热。

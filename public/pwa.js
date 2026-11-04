@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.7.7';
+  const CURRENT='4.7.9.1';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -497,9 +497,11 @@
     try{window.mocuiFuzzyMatch=smartMatch464;globalThis.mocuiFuzzyMatch=smartMatch464;}catch{}
     try{if(window.MocuiCoreV4?.search)window.MocuiCoreV4.search.match=smartMatch464;}catch{}
   }
+  // v4.7.9: 统一搜索共享商品映射，降低重复全库读取；商品变更后立即失效。
   let productMapCache464=null,productMapPromise464=null,productMapTime464=0;
+  window.addEventListener('mocui-product-index-changed',()=>{productMapCache464=null;productMapTime464=0;});
   async function productMap464(){
-    if(productMapCache464&&Date.now()-productMapTime464<2000)return productMapCache464;
+    if(productMapCache464&&Date.now()-productMapTime464<20000)return productMapCache464;
     if(productMapPromise464)return productMapPromise464;
     productMapPromise464=(async()=>{
       try{
@@ -1415,7 +1417,8 @@
     if(!updateSafe475()){try{localStorage.setItem(UPDATE_PENDING_475,target||'waiting');}catch{}return false;}
     // 绝不能把本机尚待上传的数据误判成安全的升级时机。
     let syncState=null;try{if(typeof window.CloudSync?.getV3Status==='function')syncState=await window.CloudSync.getV3Status();}catch(e){console.warn('[v4.7.6 update sync guard]',e);}
-    if(!syncState||Number(syncState.outbox||0)>0||Number(syncState.dirty||0)>0||Number(syncState.conflicts||0)>0||!updateSafe475()){try{localStorage.setItem(UPDATE_PENDING_475,target||'waiting');}catch{}return false;}
+    let atomicPending=false;try{atomicPending=Boolean(await window.MocuiAtomic479?.hasPending?.());}catch{atomicPending=true;}
+    if(!syncState||atomicPending||Number(syncState.outbox||0)>0||Number(syncState.dirty||0)>0||Number(syncState.conflicts||0)>0||!updateSafe475()){try{localStorage.setItem(UPDATE_PENDING_475,target||'waiting');}catch{}return false;}
     updateActivating475=true;try{if(target)sessionStorage.setItem('mocui_update_target',target);armReload475();reg.waiting.postMessage({type:'SKIP_WAITING_MANUAL'});return true;}catch(e){updateActivating475=false;console.warn('[v4.7.5 activate update]',e);return false;}
   }
   async function tryActivatePending475(){
