@@ -2,7 +2,7 @@
 (() => {
   const MAIN_DB="mocui_inventory_db";
   const SYNC_DB="mocui_sync_v2";
-  const SYNC_DB_VERSION=2;
+  const SYNC_DB_VERSION=3;
   const STORES=["products","categories","customers","sales","loans","stockMoves","stocktakes","settings","auditLogs"];
   const DIRTY_KEY="mocui_sync_v3_dirty";
   const LEGACY_DIRTY_KEYS=["mocui_sync_v2_dirty","mocui_local_first_v2_dirty","mocui_cloud_unsynced_v1"];
@@ -64,19 +64,20 @@
     syncDbPromise=new Promise((resolve,reject)=>{
       const req=indexedDB.open(SYNC_DB,SYNC_DB_VERSION);
       req.onupgradeneeded=()=>{
-        const db=req.result;
-        if(!db.objectStoreNames.contains("meta"))db.createObjectStore("meta",{keyPath:"key"});
-        if(!db.objectStoreNames.contains("shadow"))db.createObjectStore("shadow",{keyPath:"key"});
-        if(!db.objectStoreNames.contains("outbox")){
-          const s=db.createObjectStore("outbox",{keyPath:"id"});s.createIndex("createdAt","createdAt");s.createIndex("entityKey","entityKey");
-        }
-        if(!db.objectStoreNames.contains("conflicts")){
-          const s=db.createObjectStore("conflicts",{keyPath:"id"});s.createIndex("entityKey","entityKey");
-        }
-        if(!db.objectStoreNames.contains("dirty")){
-          const s=db.createObjectStore("dirty",{keyPath:"key"});s.createIndex("createdAt","createdAt");
-        }
-      };
+        // v4.7.9.2: repair incomplete v2 databases in-place when upgrading to v3.
+      // Never clear or delete any existing IndexedDB store or its records.
+      const db=req.result,tx=req.transaction;
+      const ensure=(name,keyPath)=>db.objectStoreNames.contains(name)
+        ?tx.objectStore(name):db.createObjectStore(name,{keyPath});
+      ensure('meta','key');ensure('shadow','key');
+      const outbox=ensure('outbox','id');
+      if(!outbox.indexNames.contains('createdAt'))outbox.createIndex('createdAt','createdAt');
+      if(!outbox.indexNames.contains('entityKey'))outbox.createIndex('entityKey','entityKey');
+      const conflicts=ensure('conflicts','id');
+      if(!conflicts.indexNames.contains('entityKey'))conflicts.createIndex('entityKey','entityKey');
+      const dirty=ensure('dirty','key');
+      if(!dirty.indexNames.contains('createdAt'))dirty.createIndex('createdAt','createdAt');
+    };
       req.onsuccess=()=>{const db=req.result;db.onversionchange=()=>{db.close();syncDbPromise=null};resolve(db)};
       req.onerror=()=>{syncDbPromise=null;reject(req.error||new Error("同步数据库打开失败"))};
     });

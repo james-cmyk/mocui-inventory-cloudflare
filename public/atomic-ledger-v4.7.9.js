@@ -1,7 +1,7 @@
 'use strict';
 /* 漠翠 ERP 4.7.9: 同一 IndexedDB 事务保存库存、流水、单据；跨库同步使用持久化恢复哨兵。 */
 (()=>{
-  const MAIN='mocui_inventory_db',SYNC='mocui_sync_v2',SYNC_VERSION=2;
+  const MAIN='mocui_inventory_db',SYNC='mocui_sync_v2',SYNC_VERSION=3;
   let mainPromise=null,syncPromise=null;
   const key=(store,id)=>`${store}:${id}`;
   const now=()=>new Date().toISOString();
@@ -12,7 +12,30 @@
   });return mainPromise;}
   function sync(){if(syncPromise)return syncPromise;syncPromise=new Promise((resolve,reject)=>{
     const req=indexedDB.open(SYNC,SYNC_VERSION);
-    req.onsuccess=()=>{req.result.onversionchange=()=>{req.result.close();syncPromise=null};resolve(req.result);};
+    req.onupgradeneeded=()=>{
+      // v4.7.9.2: repair incomplete v2 databases in-place when upgrading to v3.
+      // Never clear or delete any existing IndexedDB store or its records.
+      const db=req.result,tx=req.transaction;
+      const ensure=(name,keyPath)=>db.objectStoreNames.contains(name)
+        ?tx.objectStore(name):db.createObjectStore(name,{keyPath});
+      ensure('meta','key');ensure('shadow','key');
+      const outbox=ensure('outbox','id');
+      if(!outbox.indexNames.contains('createdAt'))outbox.createIndex('createdAt','createdAt');
+      if(!outbox.indexNames.contains('entityKey'))outbox.createIndex('entityKey','entityKey');
+      const conflicts=ensure('conflicts','id');
+      if(!conflicts.indexNames.contains('entityKey'))conflicts.createIndex('entityKey','entityKey');
+      const dirty=ensure('dirty','key');
+      if(!dirty.indexNames.contains('createdAt'))dirty.createIndex('createdAt','createdAt');
+    };
+    req.onsuccess=()=>{
+      const db=req.result;
+      if(['meta','shadow','outbox','conflicts','dirty'].some(name=>!db.objectStoreNames.contains(name))){
+        db.close();syncPromise=null;
+        reject(new Error('同步数据库缺少必要数据表，请使用无损升级修复，勿清除网站数据'));
+        return;
+      }
+      db.onversionchange=()=>{db.close();syncPromise=null};resolve(db);
+    };
     req.onerror=()=>{syncPromise=null;reject(req.error||new Error('同步队列无法打开'));};
   });return syncPromise;}
   const reqP=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
@@ -178,5 +201,5 @@
     const [guard,fullScan]=await Promise.all([reqP(meta.get('mocui_atomic_guard_v479')),reqP(meta.get('needsFullScan'))]);
     return Boolean(guard?.value?.tokens?.length||fullScan?.value);
   }
-  window.MocuiAtomic479={version:'4.7.9.1',commit,recover,hasPending,normalizeMoves};
+  window.MocuiAtomic479={version:'4.7.9.2',commit,recover,hasPending,normalizeMoves};
 })();

@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.7.9.1';
+  const CURRENT='4.7.9.2';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -1355,7 +1355,7 @@
   function updateSafe475(){
     const route=String(window.appState?.route||'');
     if(document.querySelector('.cloud-login,#modalRoot .modal-backdrop'))return false;
-    if(window.__mocuiProductDirty||window.__mocuiInitialPullPromise)return false;
+    if(window.__mocuiProductDirty||window.__mocuiInitialPullPromise||document.documentElement.dataset.initialSync==='pending')return false;
     if(document.documentElement.dataset.localDirty==='1')return false;
     try{if(JSON.parse(localStorage.getItem('mocui_sync_v3_dirty')||'null')?.dirty)return false;}catch{return false;}
     if(['sale-new','pass-deal-new'].includes(route))return false;
@@ -1407,10 +1407,12 @@
     });
   }
   function armReload475(){
-    try{sessionStorage.setItem('mocui_update_reload_once','1');}catch{}
-    if(navigator.serviceWorker&&navigator.serviceWorker.controller){
-      navigator.serviceWorker.addEventListener('controllerchange',()=>{let yes=false;try{yes=sessionStorage.getItem('mocui_update_reload_once')==='1';sessionStorage.removeItem('mocui_update_reload_once');}catch{}if(yes)location.reload();},{once:true});
-    }
+    // Never reload an active ERP session when a new Service Worker takes control.
+    // Reload explicitly on the next user-initiated open, preserving unsaved work.
+    try{sessionStorage.removeItem('mocui_update_reload_once');}catch{}
+    navigator.serviceWorker?.addEventListener('controllerchange',()=>{
+      try{localStorage.setItem('mocui_update_ready_for_next_open',CURRENT);}catch{}
+    },{once:true});
   }
   async function activateWaiting475(reg,target=''){
     if(!reg?.waiting||updateActivating475)return false;

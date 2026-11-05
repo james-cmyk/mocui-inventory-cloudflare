@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#ffffff" />
+<title>漠翠进销存 · 本机数据库修复</title>
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:#f7f8f8;color:#18231f}
+main{max-width:540px;margin:0 auto;padding:64px 18px 32px}
+h1{font-size:25px;font-weight:750;letter-spacing:-.5px;margin:0 0 12px}
+p{font-size:14px;line-height:1.8;color:#64716a}
+.card{border:1px solid #e4e9e7;border-radius:20px;background:#fff;padding:22px 18px;margin-top:22px}
+.notice{padding:13px 14px;background:#f6faf8;border-radius:12px;font-size:13px;line-height:1.75;color:#496154}
+#status{margin-top:14px;padding:15px 0;white-space:pre-wrap;line-height:1.7;font-size:14px;color:#36443d}
+button,.btn{display:block;appearance:none;width:100%;border-radius:14px;border:none;text-align:center;font:inherit;font-size:15px;font-weight:700;padding:14px;margin-top:10px;text-decoration:none;min-height:50px}
+button{background:#15211b;color:white}button:disabled{opacity:.45}
+.btn{background:#f1f4f2;color:#172820}
+small{display:block;margin-top:14px;color:#87948d;font-size:12px;line-height:1.7}
+</style>
+</head>
+<body>
+<main>
+  <h1>漠翠进销存 · 安全修复</h1>
+  <p>专门处理“IndexedDB 指定的数据表不存在”导致的启动失败。此页面不需要先登录 ERP。</p>
+  <section class="card">
+    <div class="notice"><strong>只修复本机同步数据库结构。</strong>不会清空或删除商品、销售、调借、库存、待同步操作，也不会改动云端资料。请不要卸载应用或清除 Safari 网站数据。</div>
+    <div id="status" role="status" aria-live="polite">尚未开始修复。</div>
+    <button id="fix" type="button">开始无损修复</button>
+    <a id="open" class="btn" href="./?recovered=4792" hidden>修复成功 · 重新打开 ERP</a>
+    <small>仅对当前打开此页面的浏览器数据有效。iPhone 主屏幕独立应用与 Safari 可能有不同的本机存储空间。</small>
+  </section>
+</main>
+<script>
+'use strict';
+(()=>{
+  const DATABASE='mocui_sync_v2', VERSION=3;
+  const required=['meta','shadow','outbox','conflicts','dirty'];
+  const status=document.getElementById('status'),btn=document.getElementById('fix');
+  const open=document.getElementById('open');
+  let busy=false;
+  function say(s){status.textContent=s;}
+  function schema(db,transaction){
+    // A versionchange transaction is atomic. Never call deleteObjectStore or clear.
+    const ensure=(name,keyPath)=>db.objectStoreNames.contains(name)
+      ?transaction.objectStore(name):db.createObjectStore(name,{keyPath});
+    ensure('meta','key');ensure('shadow','key');
+    const outbox=ensure('outbox','id');
+    if(!outbox.indexNames.contains('createdAt'))outbox.createIndex('createdAt','createdAt');
+    if(!outbox.indexNames.contains('entityKey'))outbox.createIndex('entityKey','entityKey');
+    const conflicts=ensure('conflicts','id');
+    if(!conflicts.indexNames.contains('entityKey'))conflicts.createIndex('entityKey','entityKey');
+    const dirty=ensure('dirty','key');
+    if(!dirty.indexNames.contains('createdAt'))dirty.createIndex('createdAt','createdAt');
+  }
+  const request=req=>new Promise((resolve,reject)=>{
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error||new Error('IndexedDB 操作失败'));
+  });
+  async function verify(db){
+    for(const name of required)if(!db.objectStoreNames.contains(name))throw new Error('缺少 '+name+' 数据表');
+    const tx=db.transaction(['outbox','dirty','conflicts'],'readonly');
+    const outbox=tx.objectStore('outbox');
+    const dirty=tx.objectStore('dirty');
+    const conflicts=tx.objectStore('conflicts');
+    for(const [store,name] of [[outbox,'createdAt'],[outbox,'entityKey'],[conflicts,'entityKey'],[dirty,'createdAt']]){
+      if(!store.indexNames.contains(name))throw new Error('缺少 '+name+' 索引');
+    }
+    const [pending,dirtyCount,conflictCount]=await Promise.all([
+      request(outbox.count()),request(dirty.count()),request(conflicts.count())
+    ]);
+    return{pending,dirtyCount,conflictCount};
+  }
+  btn.addEventListener('click',async()=>{
+    if(busy)return;
+    busy=true;btn.disabled=true;say('正在检查本机同步数据库结构…');
+    let db=null;
+    try{
+      const req=indexedDB.open(DATABASE,VERSION);
+      req.onupgradeneeded=()=>{say('检测到旧版或缺失的数据表，正在无损补建…');schema(req.result,req.transaction);};
+      req.onblocked=()=>say('升级被其他 ERP 页面占用。请关闭当前设备其他 ERP 标签页或旧桌面应用，再返回重试。请勿清空网站数据。');
+      db=await request(req);
+      db.onversionchange=()=>db.close();
+      const check=await verify(db);
+      say('数据库结构检查通过。\n待上传队列 '+check.pending+' 条 · 待处理标记 '+check.dirtyCount+' 条 · 冲突记录 '+check.conflictCount+' 条。\n这些记录未被删除。');
+      open.hidden=false;btn.textContent='再次检查';btn.disabled=false;
+    }catch(e){
+      console.error('[Mocui rescue]',e);
+      say('修复未完成：'+(e?.message||String(e))+'\n请保留本机数据，不要反复清理缓存。');
+      btn.disabled=false;
+    }finally{if(db)db.close();busy=false;}
+  });
+})();
+</script>
+</body>
+</html>

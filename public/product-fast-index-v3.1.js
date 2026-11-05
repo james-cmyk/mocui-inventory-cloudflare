@@ -244,7 +244,7 @@
   // 销售、调借、审计日志等云端更新不再触发重建 600+ 件商品索引。
   async function remoteProductSignature(){
     const db=await new Promise((res,rej)=>{
-      const req=indexedDB.open('mocui_sync_v2',2);
+      const req=indexedDB.open('mocui_sync_v2');
       req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);
     });
     try{
