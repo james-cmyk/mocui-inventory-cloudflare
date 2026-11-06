@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>漠翠进销存 · 只读故障诊断</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f8f9;color:#15221d;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:650px;margin:0 auto;padding:calc(36px + env(safe-area-inset-top)) 18px 48px}h1{font-size:22px;margin:0 0 8px}p{font-size:14px;line-height:1.7;color:#66766c}h2{font-size:16px;margin:0 0 12px}.card{background:white;border:1px solid #e1e9e4;border-radius:17px;padding:17px;margin-top:14px;box-shadow:0 1px 2px #00000004}.warn{background:#fffaf1;border-color:#f3e1c2}.green{color:#096346}.red{color:#a72a20}.muted{color:#738079;font-size:12px}.row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:10px 0;font-size:13px}.row strong{overflow-wrap:anywhere;text-align:right}button{display:block;width:100%;border:none;border-radius:13px;background:#192a22;color:#fff;font-weight:700;padding:15px;margin-top:12px;font-size:15px}button.secondary{background:#eef3ef;color:#25382d}button:disabled{opacity:.6}pre{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;max-height:52vh;overflow-y:auto;background:#f5f8f5;padding:12px;border-radius:9px}small{font-size:12px;line-height:1.7;color:#738079}.pill{display:inline-block;border-radius:10px;padding:2px 7px;background:#eaf3ed;font-size:11px;color:#276244;margin-left:5px}
+</style>
+</head>
+<body><main>
+<h1>漠翠进销存 · 故障诊断</h1>
+<p>仅检查本机数据库结构、当前版本和离线缓存。不删除、不修改、不上传任何商品、销售、调借或客户记录。</p>
+<section class="card warn"><strong>重要</strong><p>请在出现“重新连接”错误的<strong>同一个 Safari 标签页或主屏幕应用</strong>打开本页。不要清理网站数据。不同浏览器、无痕模式和桌面应用可能使用不同的本机存储。</p></section>
+<button id="run">开始只读诊断</button>
+<section class="card"><h2>检测结论</h2><div id="result">尚未开始。</div></section>
+<section class="card"><h2>诊断详情 <span class="pill">不含业务记录</span></h2><pre id="detail">点击上方按钮开始检查。</pre><button class="secondary" id="copy" disabled>复制诊断文字</button><small>请把结果截图发给 ChatGPT；不需要输入密码，也不需要导出数据库。</small></section>
+</main>
+<script>
+'use strict';(()=>{
+  const $=id=>document.getElementById(id),SCHEMA=[
+    {name:'正式业务库',db:'mocui_inventory_db',stores:['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'],indexes:{}},
+    {name:'增量同步库',db:'mocui_sync_v2',stores:['meta','shadow','outbox','conflicts','dirty'],indexes:{outbox:['createdAt','entityKey'],conflicts:['entityKey'],dirty:['createdAt']}},
+    {name:'商品快速索引',db:'mocui_perf_v313',stores:['products','meta'],indexes:{products:['updatedAt']}},
+    {name:'销售调借列表缓存',db:'mocui_list_perf_v314',stores:['sales','loans','stockMoves','customers','meta'],indexes:{sales:['sortKey','statusSort','searchText'],loans:['sortKey','statusSort','searchText'],stockMoves:['sortKey','statusSort','searchText'],customers:['sortKey','statusSort','searchText']}},
+    {name:'经营分析缓存',db:'mocui_analytics_v315',stores:['daily','monthly','customers','products','meta'],indexes:{customers:['amount'],products:['amount']}},
+    {name:'图片上传队列',db:'mocui_media_upload_queue',stores:['tradeGalleryJobs'],indexes:{}}
+  ];
+  const timeout=(promise,ms=8000)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('等待超过 '+ms+' 毫秒（可能被其他页面占用）')),ms))]);
+  let last='';
+  const line=(name,value)=>`${name}：${value}`;
+  function safeOpen(dbName){return timeout(new Promise((resolve,reject)=>{
+    const req=indexedDB.open(dbName);let finished=false;
+    req.onupgradeneeded=()=>{try{req.transaction.abort()}catch{};if(!finished){finished=true;reject(new Error('数据库刚刚不存在，已阻止自动创建'))}};
+    req.onerror=()=>{if(!finished){finished=true;reject(req.error||new Error('无法打开数据库'))}};
+    req.onblocked=()=>{if(!finished){finished=true;reject(new Error('数据库被其他页面占用'))}};
+    req.onsuccess=()=>{if(finished){req.result.close();return}finished=true;resolve(req.result)};
+  }));}
+  function readSchema(db,expected){
+    const missing=[];
+    const present=Array.from(db.objectStoreNames);
+    for(const store of expected.stores){
+      if(!db.objectStoreNames.contains(store)){missing.push('表 '+store);continue}
+      const indexes=expected.indexes[store]||[];
+      if(indexes.length){const tx=db.transaction(store,'readonly'),s=tx.objectStore(store);for(const idx of indexes)if(!s.indexNames.contains(idx))missing.push(store+' 索引 '+idx)}
+    }
+    return{present,missing};
+  }
+  function versionFromHtml(html){return html.match(/pwa\.js\?v=([^"']+)/)?.[1]||'无法识别'}
+  async function remoteVersion(){try{const r=await timeout(fetch('./version.json?diagnose='+Date.now(),{cache:'no-store'}),8000);return r.ok?await r.json():{error:'HTTP '+r.status}}catch(e){return{error:String(e.message||e)}}}
+  async function remoteHtmlVersion(){try{const r=await timeout(fetch('./index.html?diagnose='+Date.now(),{cache:'no-store'}),8000);return r.ok?versionFromHtml(await r.text()):'HTTP '+r.status}catch(e){return '获取失败：'+String(e.message||e)}}
+  async function cachesReport(){
+    if(!('caches' in window))return{available:false};
+    try{const names=await caches.keys(),items=[];
+      for(const name of names){if(!name.startsWith('mocui-'))continue;const c=await caches.open(name);const r=await c.match('./index.html');let version='未缓存首页';if(r){version=versionFromHtml(await r.text())}items.push({name,homepageVersion:version})}
+      return{names:items};
+    }catch(e){return{error:String(e.message||e)}}
+  }
+  async function workerReport(){
+    if(!('serviceWorker'in navigator))return{available:false};
+    try{const reg=await navigator.serviceWorker.getRegistration('./');return{controller:navigator.serviceWorker.controller?.scriptURL||'无',active:reg?.active?.scriptURL||'无',waiting:reg?.waiting?.scriptURL||'无',installing:reg?.installing?.scriptURL||'无'}}catch(e){return{error:String(e.message||e)}}
+  }
+  async function diagnose(){
+    const report={time:new Date().toISOString(),browser:navigator.userAgent,context:location.href,databases:[],versionJson:await remoteVersion(),onlineHtml:await remoteHtmlVersion(),serviceWorker:await workerReport(),cache:await cachesReport()};
+    if(typeof indexedDB.databases!=='function'){
+      report.databaseListing='当前浏览器不支持安全列出数据库；为避免建立空数据库，不执行检查。';return report;
+    }
+    let list;try{list=await timeout(indexedDB.databases(),8000)}catch(e){report.databaseListing='列出数据库失败：'+String(e.message||e);return report}
+    const existing=new Map(list.filter(x=>x?.name).map(x=>[x.name,x]));
+    for(const expected of SCHEMA){
+      if(!existing.has(expected.db)){report.databases.push({name:expected.name,db:expected.db,result:'不存在（未创建）'});continue}
+      let db;try{
+        db=await safeOpen(expected.db);const actual=readSchema(db,expected);
+        report.databases.push({name:expected.name,db:expected.db,version:db.version,present:actual.present,missing:actual.missing,result:actual.missing.length?'缺少表或索引':'结构完整'});
+      }catch(e){report.databases.push({name:expected.name,db:expected.db,result:'检查失败',error:String(e.message||e)})}
+      finally{try{db?.close()}catch{}}
+    }
+    return report;
+  }
+  function display(report){
+    last=JSON.stringify(report,null,2);$('detail').textContent=last;
+    const bad=report.databases.filter(d=>d.missing?.length),errors=report.databases.filter(d=>d.error),missingDb=report.databases.filter(d=>d.result==='不存在（未创建）');
+    const v=report.versionJson?.version||'未知',html=report.onlineHtml;
+    const lines=[line('云端版本',v),line('线上首页脚本版本',html),line('数据库检查',report.databaseListing||`${report.databases.length} 项`),line('结构缺失',bad.length+' 个数据库'),line('其他检查错误',errors.length+' 项')];
+    if(bad.length)lines.push('缺失项目：'+bad.map(x=>x.db+' → '+x.missing.join('、')).join('；'));
+    if(missingDb.length)lines.push('尚未创建的库：'+missingDb.map(x=>x.db).join('、')+'（未作改动）');
+    if(v!==html&&v!=='未知')lines.push('注意：版本信息与线上首页脚本版本不同，需排查部署/缓存混用');
+    if(!bad.length&&!errors.length&&typeof indexedDB.databases==='function')lines.push('未发现上述数据库缺表；需要继续排查实际事务调用及浏览器缓存，不应直接清除数据。');
+    $('result').innerHTML='';const pre=document.createElement('pre');pre.textContent=lines.join('\n');$('result').appendChild(pre);$('copy').disabled=false;
+  }
+  $('run').onclick=async()=>{$('run').disabled=true;$('result').textContent='正在读取数据库结构和缓存，不会修改记录…';try{const r=await diagnose();display(r)}catch(e){$('result').textContent='诊断失败：'+String(e.message||e);last=String(e.stack||e)}finally{$('run').disabled=false}};
+  $('copy').onclick=()=>{if(!last)return;if(navigator.clipboard?.writeText)navigator.clipboard.writeText(last).then(()=>$('copy').textContent='已复制').catch(()=>window.prompt('长按复制以下诊断文字',last));else window.prompt('长按复制以下诊断文字',last)};
+})();
+</script></body></html>
