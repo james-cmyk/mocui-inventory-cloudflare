@@ -1,98 +1,40 @@
 <!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<meta name="theme-color" content="#ffffff" />
-<title>漠翠进销存 · 本机数据库修复</title>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>漠翠进销存 · 安全修复</title>
 <style>
-:root{color-scheme:light}*{box-sizing:border-box}
-[hidden]{display:none!important}
-html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:#f7f8f8;color:#18231f}
-main{max-width:540px;margin:0 auto;padding:64px 18px 32px}
-h1{font-size:25px;font-weight:750;letter-spacing:-.5px;margin:0 0 12px}
-p{font-size:14px;line-height:1.8;color:#64716a}
-.card{border:1px solid #e4e9e7;border-radius:20px;background:#fff;padding:22px 18px;margin-top:22px}
-.notice{padding:13px 14px;background:#f6faf8;border-radius:12px;font-size:13px;line-height:1.75;color:#496154}
-#status{margin-top:14px;padding:15px 0;white-space:pre-wrap;line-height:1.7;font-size:14px;color:#36443d}
-button,.btn{display:block;appearance:none;width:100%;border-radius:14px;border:none;text-align:center;font:inherit;font-size:15px;font-weight:700;padding:14px;margin-top:10px;text-decoration:none;min-height:50px}
-button{background:#15211b;color:white}button:disabled{opacity:.45}
-.btn{background:#f1f4f2;color:#172820}
-small{display:block;margin-top:14px;color:#87948d;font-size:12px;line-height:1.7}
-</style>
-</head>
-<body>
-<main>
-  <h1>漠翠进销存 · 安全修复</h1>
-  <p>专门处理“IndexedDB 指定的数据表不存在”导致的启动失败。此页面不需要先登录 ERP。</p>
-  <section class="card">
-    <div class="notice"><strong>只修复本机同步数据库结构。</strong>不会清空或删除商品、销售、调借、库存、待同步操作，也不会改动云端资料。请不要卸载应用或清除 Safari 网站数据。</div>
-    <div id="status" role="status" aria-live="polite">尚未开始修复。</div>
-    <button id="fix" type="button">开始无损修复</button>
-    <a id="open" class="btn" href="./?recovered=4792" hidden>修复成功 · 重新打开 ERP</a>
-    <small>仅对当前打开此页面的浏览器数据有效。iPhone 主屏幕独立应用与 Safari 可能有不同的本机存储空间。</small>
-  </section>
-</main>
+*{box-sizing:border-box}html,body{margin:0;background:#f7f8f8;color:#18231f;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:520px;margin:auto;padding:56px 18px}h1{font-size:24px;margin:0 0 12px}p{font-size:14px;color:#64716a;line-height:1.75}.card{padding:20px;background:#fff;border:1px solid #e2e7e5;border-radius:18px;margin-top:24px}.note{font-size:13px;background:#f2f7f4;padding:12px;border-radius:11px;line-height:1.65;color:#466051}button,a.action{width:100%;display:block;margin-top:13px;text-align:center;border:none;padding:15px;border-radius:13px;font-weight:700;font-size:15px;text-decoration:none}button{background:#15211b;color:#fff}button:disabled{opacity:.6}a.action{background:#f1f3f2;color:#15211b}pre{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.7;color:#3a4e43}small{font-size:12px;line-height:1.7;display:block;color:#87958d}
+</style></head><body><main><h1>漠翠进销存 · 安全诊断</h1><p>用于处理“数据库指定的数据表不存在”的启动失败。请在发生故障的**同一个浏览器/主屏幕应用环境**中使用。</p><section class="card"><div class="note"><strong>不清空、不重置、不删除数据。</strong>仅补建缺失的数据库表和索引，不会修改商品、销售、借调、库存或云端记录。</div><pre id="status" role="status" aria-live="polite">尚未开始检查。</pre><button id="start" type="button">检查并修复本机数据库</button><button class="action" id="home" type="button" hidden>检查通过 · 切换新版并打开 ERP</button><small>如提示被其他页面阻塞，请关闭其他 ERP 标签页后再试。Safari 和主屏幕应用可能使用不同的本机存储空间。</small></section></main>
+<script src="db-schema-guard-v4.7.9.4.js?v=4.7.9.4"></script>
 <script>
-'use strict';
-(()=>{
-  const DATABASE='mocui_sync_v2', VERSION=3;
-  const required=['meta','shadow','outbox','conflicts','dirty'];
-  const status=document.getElementById('status'),btn=document.getElementById('fix');
-  const open=document.getElementById('open');
-  let busy=false;
-  function say(s){status.textContent=s;}
-  function schema(db,transaction){
-    // A versionchange transaction is atomic. Never call deleteObjectStore or clear.
-    const ensure=(name,keyPath)=>db.objectStoreNames.contains(name)
-      ?transaction.objectStore(name):db.createObjectStore(name,{keyPath});
-    ensure('meta','key');ensure('shadow','key');
-    const outbox=ensure('outbox','id');
-    if(!outbox.indexNames.contains('createdAt'))outbox.createIndex('createdAt','createdAt');
-    if(!outbox.indexNames.contains('entityKey'))outbox.createIndex('entityKey','entityKey');
-    const conflicts=ensure('conflicts','id');
-    if(!conflicts.indexNames.contains('entityKey'))conflicts.createIndex('entityKey','entityKey');
-    const dirty=ensure('dirty','key');
-    if(!dirty.indexNames.contains('createdAt'))dirty.createIndex('createdAt','createdAt');
-  }
-  const request=req=>new Promise((resolve,reject)=>{
-    req.onsuccess=()=>resolve(req.result);
-    req.onerror=()=>reject(req.error||new Error('IndexedDB 操作失败'));
-  });
-  async function verify(db){
-    for(const name of required)if(!db.objectStoreNames.contains(name))throw new Error('缺少 '+name+' 数据表');
-    const tx=db.transaction(['outbox','dirty','conflicts'],'readonly');
-    const outbox=tx.objectStore('outbox');
-    const dirty=tx.objectStore('dirty');
-    const conflicts=tx.objectStore('conflicts');
-    for(const [store,name] of [[outbox,'createdAt'],[outbox,'entityKey'],[conflicts,'entityKey'],[dirty,'createdAt']]){
-      if(!store.indexNames.contains(name))throw new Error('缺少 '+name+' 索引');
-    }
-    const [pending,dirtyCount,conflictCount]=await Promise.all([
-      request(outbox.count()),request(dirty.count()),request(conflicts.count())
-    ]);
-    return{pending,dirtyCount,conflictCount};
-  }
-  btn.addEventListener('click',async()=>{
-    if(busy)return;
-    busy=true;btn.disabled=true;say('正在检查本机同步数据库结构…');
-    let db=null;
+'use strict';(()=>{const btn=document.getElementById('start'),label=document.getElementById('status'),home=document.getElementById('home');btn.onclick=async()=>{btn.disabled=true;home.hidden=true;label.textContent='正在检查正式业务数据库与同步数据库…';try{const results=await window.MocuiSchemaGuard4794.check();label.textContent=results.map(x=>`${x.name}：版本 ${x.version}，${x.modified?'已补建 '+(x.added||[]).join('、'):'结构完整，无须变动'}`).join('\n')+'\n所有检查已完成。本机业务数据和待同步记录未被清空。';home.hidden=false;}catch(e){label.textContent='修复尚未完成：'+(e?.message||String(e))+'\n请不要删除本机数据。';}finally{btn.disabled=false;}};
+  home.onclick=async()=>{
+    home.disabled=true;label.textContent+='\n正在检查应用离线缓存并切换新版，已有本机数据不会被清除…';
     try{
-      const req=indexedDB.open(DATABASE,VERSION);
-      req.onupgradeneeded=()=>{say('检测到旧版或缺失的数据表，正在无损补建…');schema(req.result,req.transaction);};
-      req.onblocked=()=>say('升级被其他 ERP 页面占用。请关闭当前设备其他 ERP 标签页或旧桌面应用，再返回重试。请勿清空网站数据。');
-      db=await request(req);
-      db.onversionchange=()=>db.close();
-      const check=await verify(db);
-      say('数据库结构检查通过。\n待上传队列 '+check.pending+' 条 · 待处理标记 '+check.dirtyCount+' 条 · 冲突记录 '+check.conflictCount+' 条。\n这些记录未被删除。');
-      open.hidden=false;btn.textContent='再次检查';btn.disabled=false;
-    }catch(e){
-      console.error('[Mocui rescue]',e);
-      say('修复未完成：'+(e?.message||String(e))+'\n请保留本机数据，不要反复清理缓存。');
-      btn.disabled=false;
-    }finally{if(db)db.close();busy=false;}
-  });
+      if('serviceWorker' in navigator){
+        let registration=await navigator.serviceWorker.getRegistration('./');
+        if(!registration)registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
+        else await registration.update();
+        const worker=registration.waiting||registration.installing;
+        if(worker&&worker.state!=='installed')await new Promise((resolve,reject)=>{
+          let done=false;
+          const timer=setTimeout(()=>{if(!done){done=true;reject(new Error('新版缓存下载超时'))}},65000);
+          const listener=()=>{if(done)return;
+            if(worker.state==='installed'){done=true;clearTimeout(timer);resolve()}
+            else if(worker.state==='redundant'){done=true;clearTimeout(timer);reject(new Error('新版缓存未能安装'))}
+          };
+          worker.addEventListener('statechange',listener);listener();
+        });
+        if(registration.waiting){
+          registration.waiting.postMessage({type:'SKIP_WAITING_MANUAL'});
+          await new Promise(resolve=>{let completed=false;const done=()=>{if(completed)return;completed=true;resolve()};navigator.serviceWorker.addEventListener('controllerchange',done,{once:true});setTimeout(done,3500)});
+        }
+      }
+      location.replace('./?db_repaired=4794');
+    }catch(error){
+      label.textContent+='\n切换缓存未完成：'+(error?.message||String(error))+'。\n可以点“返回 ERP”使用带版本参数的新页面，绝不要清空本机数据。';
+      home.textContent='跳过缓存切换，打开新版 ERP';
+      home.onclick=()=>location.replace('./?db_repaired=4794');
+      home.disabled=false;
+    }
+  };
 })();
-</script>
-</body>
-</html>
+</script></body></html>

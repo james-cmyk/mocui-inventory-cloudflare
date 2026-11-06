@@ -7,7 +7,7 @@
   const state={running:false,last:null,errors:[]};
   const num=v=>Number(v||0);
   const reqP=req=>new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});
-  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,DB_VERSION);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('数据库正在被其他页面占用'));});}
+  function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);r.onblocked=()=>rej(new Error('数据库正在被其他页面占用'));});}
   async function readAll(){
     const db=await openDB(),out={};
     try{for(const s of STORES){if(!db.objectStoreNames.contains(s))throw new Error(`缺少正式数据表：${s}`);out[s]=await reqP(db.transaction(s,'readonly').objectStore(s).getAll());}}

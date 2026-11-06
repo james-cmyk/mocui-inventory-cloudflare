@@ -125,7 +125,7 @@ async function writeAudit(action,entityType,entityId,summary,before=null,after=n
 
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req=indexedDB.open(DB_NAME,DB_VERSION);
+    const req=indexedDB.open(DB_NAME);
     req.onupgradeneeded=()=>{
       const d=req.result;
       STORES.forEach(name=>{ if(!d.objectStoreNames.contains(name)) d.createObjectStore(name,{keyPath:'id'}); });
@@ -2382,7 +2382,11 @@ function failBoot(error){
   const el=$('#bootScreen');if(!el)return;
   el.classList.add('has-error');
   setBootStatus(`连接失败：${error.message||'请检查网络后重试'}`);
-  const retry=$('#bootRetry');if(retry)retry.onclick=()=>location.reload();
+  const retry=$('#bootRetry');if(retry){
+    const databaseProblem=/object store|object stores|IndexedDB|数据表|数据库|transaction|版本/i.test(String(error?.message||error));
+    retry.textContent=databaseProblem?'检查本机数据库':'重新连接';
+    retry.onclick=()=>{if(databaseProblem)location.href='./repair.html';else location.reload();};
+  }
 }
 function showInitialSyncPill(){
   let pill=$('#initialSyncPill');if(pill)return pill;
@@ -2427,6 +2431,9 @@ function bindPrimaryNavigation(){
   });
 }
 async function init(){
+  setBootStatus('正在检查本机数据表…');
+  if(!window.MocuiSchemaGuard4794)throw new Error('缺少安全数据库检查模块，请检查页面是否加载了最新版');
+  await window.MocuiSchemaGuard4794.check();
   setBootStatus('正在读取本机数据…');
   db=await openDB();
   if(window.MocuiAtomic479)await window.MocuiAtomic479.recover();

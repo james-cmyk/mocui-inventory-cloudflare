@@ -5,7 +5,7 @@
   const required=['products','categories','customers','sales','loans','stockMoves','stocktakes','settings','auditLogs'];
   const state={checked:false,ok:false,issues:[],cacheRepairs:[],lastSnapshotAt:0};
 
-  function openBusiness(){return new Promise((res,rej)=>{const r=indexedDB.open(BUSINESS_DB,BUSINESS_VERSION);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+  function openBusiness(){return new Promise((res,rej)=>{const r=indexedDB.open(BUSINESS_DB);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
   const reqP=r=>new Promise((res,rej)=>{r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
 
   async function healthCheck(){

@@ -6,12 +6,12 @@
   const key=(store,id)=>`${store}:${id}`;
   const now=()=>new Date().toISOString();
   function main(){if(mainPromise)return mainPromise;mainPromise=new Promise((resolve,reject)=>{
-    const req=indexedDB.open(MAIN,2);
+    const req=indexedDB.open(MAIN);
     req.onsuccess=()=>{req.result.onversionchange=()=>{req.result.close();mainPromise=null};resolve(req.result);};
     req.onerror=()=>{mainPromise=null;reject(req.error||new Error('本机数据库无法打开'));};
   });return mainPromise;}
   function sync(){if(syncPromise)return syncPromise;syncPromise=new Promise((resolve,reject)=>{
-    const req=indexedDB.open(SYNC,SYNC_VERSION);
+    const req=indexedDB.open(SYNC);
     req.onupgradeneeded=()=>{
       // v4.7.9.2: repair incomplete v2 databases in-place when upgrading to v3.
       // Never clear or delete any existing IndexedDB store or its records.

@@ -62,7 +62,7 @@
   function openSyncDb(){
     if(syncDbPromise)return syncDbPromise;
     syncDbPromise=new Promise((resolve,reject)=>{
-      const req=indexedDB.open(SYNC_DB,SYNC_DB_VERSION);
+      const req=indexedDB.open(SYNC_DB);
       req.onupgradeneeded=()=>{
         // v4.7.9.2: repair incomplete v2 databases in-place when upgrading to v3.
       // Never clear or delete any existing IndexedDB store or its records.
@@ -171,45 +171,92 @@
     await new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite"),os=tx.objectStore(store);mutation==="delete"?os.delete(id):os.put(payload);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)});
   }
 
+  // iPhone memory protection: each read keeps at most 8 objects (including large product images) in RAM.
+  // No skip/delete of sync records; scan cursor from its last primary key.
+  async function readPage(database,store,after=null,limit=8){
+    return new Promise((resolve,reject)=>{
+      const tx=database.transaction(store,'readonly'),os=tx.objectStore(store);
+      const range=after===null?undefined:IDBKeyRange.lowerBound(after,true);
+      const req=os.openCursor(range);let rows=[],lastKey=after,settled=false;
+      const done=(fn,value)=>{if(settled)return;settled=true;fn(value)};
+      req.onerror=()=>done(reject,req.error||new Error(`${store} 分批读取失败`));
+      tx.onabort=()=>done(reject,tx.error||new Error(`${store} 数据读取中断`));
+      req.onsuccess=()=>{
+        const c=req.result;
+        if(!c)return done(resolve,{rows,lastKey,finished:true});
+        rows.push(c.value);lastKey=c.key;
+        if(rows.length>=limit)return done(resolve,{rows,lastKey,finished:false});
+        c.continue();
+      };
+    });
+  }
   async function fullScanOnce(){
-    // v4.7.9.3: 一次只读取一个业务表，避免几百件玉石的图片和所有账本常驻内存。
-    // 保持原有哈希 / 脏数据 / 删除判断语义，不自动删除原始业务记录。
-    const db=await openMainDb(),shadows=await all("shadow");
+    const db=await openMainDb(),shadows=await all('shadow');
     const shadowMap=new Map(shadows.map(x=>[x.key,x])),current=new Set();
     for(const store of STORES){
-      const rows=db.objectStoreNames.contains(store)
-        ?await reqP(db.transaction(store,"readonly").objectStore(store).getAll()):[];
-      let processed=0;
-      for(const row of rows){
-        if(row?.id==null)continue;
-        const k=entityKey(store,row.id);current.add(k);
-        const hash=await hashValue(row),shadow=shadowMap.get(k);
-        if(!shadow||shadow.deleted||shadow.hash!==hash)await put("dirty",{key:k,store,recordId:String(row.id),mutation:"put",payload:row,createdAt:now()});
-        if(++processed%12===0)await new Promise(r=>setTimeout(r,0));
+      if(!db.objectStoreNames.contains(store))continue;
+      let after=null;
+      while(true){
+        const page=await readPage(db,store,after,8);
+        for(const row of page.rows){
+          if(row?.id==null)continue;
+          const k=entityKey(store,row.id);current.add(k);
+          const hash=await hashValue(row),shadow=shadowMap.get(k);
+          if(!shadow||shadow.deleted||shadow.hash!==hash){
+            await put('dirty',{key:k,store,recordId:String(row.id),mutation:'put',payload:row,createdAt:now()});
+          }
+        }
+        if(page.finished)break;
+        after=page.lastKey;
+        await new Promise(r=>setTimeout(r,0));
       }
-      await new Promise(r=>setTimeout(r,0));
     }
     for(const shadow of shadows){
-      if(!shadow.deleted&&!current.has(shadow.key))await put("dirty",{key:shadow.key,store:shadow.store,recordId:shadow.recordId,mutation:"delete",payload:null,createdAt:now()});
+      if(shadow.deleted||current.has(shadow.key)||!STORES.includes(shadow.store))continue;
+      // 分批扫描期间可能有新建/修改操作，删除标记必须再次核实业务库当前确实不存在。
+      const currentDb=await openMainDb();
+      if(!currentDb.objectStoreNames.contains(shadow.store))continue;
+      const stillThere=await reqP(currentDb.transaction(shadow.store,'readonly').objectStore(shadow.store).get(shadow.recordId));
+      if(stillThere!==undefined)continue;
+      await put('dirty',{key:shadow.key,store:shadow.store,recordId:shadow.recordId,mutation:'delete',payload:null,createdAt:now()});
     }
-    await metaSet("needsFullScan",false);
+    await metaSet('needsFullScan',false);
   }
-
+  async function outboxByEntityKey(k){
+    const db=await openSyncDb();
+    return reqP(db.transaction('outbox','readonly').objectStore('outbox').index('entityKey').getAll(k));
+  }
   async function captureDirty(){
-    if(await metaGet("needsFullScan",false))await fullScanOnce();
-    const [dirty,conflicts]=await Promise.all([all("dirty"),all("conflicts")]);
+    if(await metaGet('needsFullScan',false))await fullScanOnce();
+    const db=await openSyncDb(),conflicts=await all('conflicts');
     const conflictKeys=new Set(conflicts.map(x=>x.entityKey));
-    for(const item of dirty){
-      if(conflictKeys.has(item.key))continue;
-      const existing=(await all("outbox")).find(x=>x.entityKey===item.key);
-      if(existing)await del("outbox",existing.id);
-      let hash="";
-      if(item.mutation==="put")hash=await hashValue(item.payload);
-      const shadow=await get("shadow",item.key);
-      if(item.mutation==="put"&&shadow&&!shadow.deleted&&shadow.hash===hash){await del("dirty",item.key);continue}
-      const op={id:crypto.randomUUID(),opId:crypto.randomUUID(),entityKey:item.key,store:item.store,recordId:item.recordId,mutation:item.mutation,payload:item.payload,hash,baseSeq:Number(shadow?.lastSeq??cursor),clientTime:now(),createdAt:Number(item.createdAt||now())};
-      await put("outbox",op);await del("dirty",item.key);
+    let after=null;
+    while(true){
+      const page=await readPage(db,'dirty',after,8);
+      for(const item of page.rows){
+        if(conflictKeys.has(item.key))continue;
+        const existing=await outboxByEntityKey(item.key);
+        for(const row of existing)await del('outbox',row.id);
+        let hash='';if(item.mutation==='put')hash=await hashValue(item.payload);
+        const shadow=await get('shadow',item.key);
+        if(item.mutation==='put'&&shadow&&!shadow.deleted&&shadow.hash===hash){await del('dirty',item.key);continue}
+        const op={id:crypto.randomUUID(),opId:crypto.randomUUID(),entityKey:item.key,store:item.store,recordId:item.recordId,mutation:item.mutation,payload:item.payload,hash,baseSeq:Number(shadow?.lastSeq??cursor),clientTime:now(),createdAt:Number(item.createdAt||now())};
+        await put('outbox',op);await del('dirty',item.key);
+      }
+      if(page.finished)break;
+      after=page.lastKey;
+      await new Promise(r=>setTimeout(r,0));
     }
+  }
+  async function countStore(store){
+    const db=await openSyncDb();return reqP(db.transaction(store,'readonly').objectStore(store).count());
+  }
+  async function oldestOutbox(limit=30){
+    const db=await openSyncDb();return new Promise((resolve,reject)=>{
+      const tx=db.transaction('outbox','readonly'),idx=tx.objectStore('outbox').index('createdAt'),req=idx.openCursor();
+      const records=[];req.onerror=()=>reject(req.error);
+      req.onsuccess=()=>{const c=req.result;if(!c)return resolve(records);records.push(c.value);if(records.length>=limit)return resolve(records);c.continue();};
+    });
   }
 
   function chooseBatch(ops){
@@ -239,7 +286,12 @@
   }
   async function flushOutbox(){
     for(let safety=0;safety<100;safety++){
-      const ops=await all("outbox");if(!ops.length)return;
+      let ops=await oldestOutbox(MAX_BATCH_OPS);
+      if(!ops.length&&await countStore('outbox')>0){
+        // 兼容旧版缺少 createdAt 的未上传操作，绝不因为索引无键而跳过它们。
+        const db=await openSyncDb();ops=(await readPage(db,'outbox',null,MAX_BATCH_OPS)).rows;
+      }
+      if(!ops.length)return;
       const batch=chooseBatch(ops);if(!batch.length)return;
       const response=await api("/api/sync/v2/ops",{method:"POST",body:JSON.stringify({cursor,deviceId:cloud.deviceId,operations:batch.map(x=>x.wire)})});
       const byId=new Map(batch.map(x=>[x.local.opId,x.local]));
@@ -289,12 +341,15 @@
       if(!migrated){await metaSet("needsFullScan",true);await metaSet("v3JournalReady",true);markDirty("v3-migration")}
       return;
     }
-    const result=await api("/api/sync/v2/bootstrap"),remote=result.snapshot?.stores||{},local=await snapshotLocal(),merged={};
-    for(const store of STORES)merged[store]=mergeById(local[store]||[],remote[store]||[]);
+    const result=await api("/api/sync/v2/bootstrap"),remote=result.snapshot?.stores||{};
     const db=await openMainDb();
+    // 首次同步按业务表逐个合并，避免同时保留本机完整数据与远程完整数据的双份副本。
     for(const store of STORES){
       if(!db.objectStoreNames.contains(store))continue;
-      await new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite"),os=tx.objectStore(store);for(const row of merged[store]||[])os.put(row);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)});
+      const localRows=await reqP(db.transaction(store,'readonly').objectStore(store).getAll());
+      const merged=mergeById(localRows,remote[store]||[]);
+      await new Promise((res,rej)=>{const tx=db.transaction(store,"readwrite"),os=tx.objectStore(store);for(const row of merged)os.put(row);tx.oncomplete=res;tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error)});
+      await new Promise(r=>setTimeout(r,0));
     }
     cursor=Number(result.cursor||0);await clear("shadow");
     for(const store of STORES)for(const row of remote[store]||[])if(row?.id!=null)await put("shadow",{key:entityKey(store,row.id),store,recordId:String(row.id),hash:await hashValue(row),deleted:false,lastSeq:cursor,updatedAt:now()});
@@ -306,13 +361,13 @@
     syncing=true;clearTimeout(retryTimer);updateStatus("syncing");
     try{
       await captureDirty();await flushOutbox();if(pull)await pullRemoteOps();await captureDirty();
-      const [remaining,conflicts,dirty]=await Promise.all([all("outbox"),all("conflicts"),all("dirty")]);
-      if(conflicts.length)updateStatus("conflict");
-      else if(remaining.length||dirty.length){markDirty("pending-after-cycle");updateStatus("pending")}
+      const [remaining,conflicts,dirty]=await Promise.all([countStore("outbox"),countStore("conflicts"),countStore("dirty")]);
+      if(conflicts>0)updateStatus("conflict");
+      else if(remaining>0||dirty>0){markDirty("pending-after-cycle");updateStatus("pending")}
       else{clearDirty();updateStatus("synced")}
       retryDelay=2000;
-      window.dispatchEvent(new CustomEvent("cloud-sync-ok",{detail:{cursor,pending:remaining.length,conflicts:conflicts.length,protocol:"v3-journal"}}));
-      return{ok:true,cursor,pending:remaining.length,conflicts:conflicts.length};
+      window.dispatchEvent(new CustomEvent("cloud-sync-ok",{detail:{cursor,pending:remaining,conflicts:conflicts,protocol:"v3-journal"}}));
+      return{ok:true,cursor,pending:remaining,conflicts:conflicts};
     }catch(error){
       markDirty(error.status===401?"login-required":"sync-error");updateStatus("offline");
       clearTimeout(retryTimer);retryTimer=setTimeout(()=>{if(navigator.onLine)void syncCycle().catch(()=>{})},retryDelay);retryDelay=Math.min(60000,Math.round(retryDelay*1.8));
@@ -325,13 +380,13 @@
   }
   async function bootstrap(options={}){
     const result=await original.bootstrap({...options,deferPull:true});authenticated=true;await firstBootstrapIfNeeded();
-    const [pending,conflicts]=await Promise.all([all("outbox"),all("conflicts")]);
-    if(conflicts.length)updateStatus("conflict");else if(pending.length||hasDirtyMarker())updateStatus("pending");else updateStatus("synced");
+    const [pending,conflicts]=await Promise.all([countStore("outbox"),countStore("conflicts")]);
+    if(conflicts>0)updateStatus("conflict");else if(pending>0||hasDirtyMarker())updateStatus("pending");else updateStatus("synced");
     // v4.7.9.3: 由 app-core 在首屏稳定后发起一次同步。
     // 此处不再启动第二个同步循环，防止同步争抢和错误的“同步完成”回调。
     return{...result,protocol:"v3-journal"};
   }
-  async function status(){const [o,c,d]=await Promise.all([all("outbox"),all("conflicts"),all("dirty")]);return{cursor,outbox:o.length,conflicts:c.length,dirty:d.length}}
+  async function status(){const [o,c,d]=await Promise.all([countStore("outbox"),countStore("conflicts"),countStore("dirty")]);return{cursor,outbox:o,conflicts:c,dirty:d}}
   async function resolveConflict(id,choice="remote"){
     const conflict=await get("conflicts",id);if(!conflict)throw new Error("没有找到冲突记录");
     if(choice==="remote"){

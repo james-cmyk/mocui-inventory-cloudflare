@@ -31,7 +31,7 @@
   }
   function openSource(){
     if(sdb)return Promise.resolve(sdb);
-    return new Promise((res,rej)=>{const r=indexedDB.open(SOURCE_DB,SOURCE_VERSION);r.onsuccess=()=>{sdb=r.result;res(sdb)};r.onerror=()=>rej(r.error);});
+    return new Promise((res,rej)=>{const r=indexedDB.open(SOURCE_DB);r.onsuccess=()=>{sdb=r.result;res(sdb)};r.onerror=()=>rej(r.error);});
   }
   async function sourceAll(store){const d=await openSource();return reqP(d.transaction(store,'readonly').objectStore(store).getAll());}
   async function meta(id){const d=await openAnalytics();return reqP(d.transaction('meta','readonly').objectStore('meta').get(id));}

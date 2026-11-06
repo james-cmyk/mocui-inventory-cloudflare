@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.7.9.3';
+  const CURRENT='4.7.9.4';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
