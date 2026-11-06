@@ -1,4 +1,4 @@
-const CACHE='mocui-v4.7.9.2-idb-repair';
+const CACHE='mocui-v4.7.9.3-resume-stability';
 const SHELL=[
   './','./index.html','./repair.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
   './ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./ui-refine-v2.4.css?v=2.4.0',
@@ -8,9 +8,9 @@ const SHELL=[
   './ui-shell-framework-v4.10.css?v=4.0.2','./app-shell-v4.0.4.css?v=4.0.5','./core-safety-v4.1.css?v=4.1.4',
   './mocui-lite-v4.5.3.css?v=4.5.3','./media-multi-v4.4.5.css?v=4.5.9','./ios-input-zoom-fix-v4.5.4.css?v=4.5.4',
   './trade-picker-v4.5.8.css?v=4.5.8','./loan-return-undo-v4.6.0.css?v=4.6.0',
-  './pwa.js?v=4.7.9.2','./cloud.js','./sync-v3.js?v=4.7.9.2','./qinsilk-import.js','./content-workbench.js',
-  './app-core-v4.1.4.js?v=4.7.9.1','./atomic-ledger-v4.7.9.js?v=4.7.9.2','./sales-cost-v3.js?v=3.13.0','./performance-v3.js?v=3.0.0',
-  './navigation-stability-v3.0.3.js?v=3.0.3','./trade-gallery-queue.js?v=1.6.0','./business-ux-v2.js?v=2.2.0',
+  './pwa.js?v=4.7.9.3','./cloud.js','./sync-v3.js?v=4.7.9.3','./qinsilk-import.js','./content-workbench.js',
+  './app-core-v4.1.4.js?v=4.7.9.3','./atomic-ledger-v4.7.9.js?v=4.7.9.2','./sales-cost-v3.js?v=3.13.0','./performance-v3.js?v=3.0.0',
+  './navigation-stability-v3.0.3.js?v=4.7.9.3','./trade-gallery-queue.js?v=1.6.0','./business-ux-v2.js?v=2.2.0',
   './ui-refine-v2.4.1.js?v=2.4.2','./ui-icons.js?v=1.4.1','./ui-shell-guard.js','./product-fast-index-v3.1.js?v=4.7.9.2',
   './large-data-lists-v3.14.js?v=4.0.0','./analytics-precompute-v3.15.js?v=3.17.0','./analytics-incremental-v3.17.js?v=3.17.0',
   './analytics-dashboard-v3.15.js?v=3.17.0','./stability-safety-v3.18.js?v=3.18.0','./stability-diagnostics-v3.18.js?v=3.18.0',
@@ -49,7 +49,10 @@ self.addEventListener('install',event=>{
 });
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING_MANUAL')self.skipWaiting();});
 self.addEventListener('activate',event=>{
-  event.waitUntil((async()=>{const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('mocui-')&&k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim();})());
+  event.waitUntil((async()=>{const keys=(await caches.keys()).filter(k=>k.startsWith('mocui-')&&k!==CACHE);
+    // 保留最近一个旧壳版本，避免正在使用的旧页面突然失去脚本缓存。
+    const stale=keys.slice(0,Math.max(0,keys.length-1));
+    await Promise.all(stale.map(k=>caches.delete(k)));await self.clients.claim();})());
 });
 async function networkFallback(request,fallback){
   try{const r=await fetch(request,{cache:'no-store'});if(r.ok){const c=await caches.open(CACHE);c.put(request,r.clone()).catch(()=>{});}return r;}

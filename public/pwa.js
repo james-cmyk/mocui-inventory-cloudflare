@@ -1,6 +1,6 @@
 'use strict';
 (()=>{
-  const CURRENT='4.7.9.2';
+  const CURRENT='4.7.9.3';
   const VERSION_URL='./version.json';
   let registration=null,checking=false,lastCheck=0;
   const qs=s=>document.querySelector(s);
@@ -773,8 +773,8 @@
     if(window.appState?.route!=='dashboard'||typeof window.dbAll!=='function')return;
     const seq=++homeFocusSeq466,home=document.querySelector('.v44-home');if(!home)return;installHomeFocus466Styles();
     document.getElementById('v466HomeTasks')?.remove();document.getElementById('v466Recent')?.remove();document.querySelector('.v44-attention')?.remove();
-    let sales=[],loans=[],logs=[];
-    try{[sales,loans,logs]=await Promise.all([window.dbAll('sales'),window.dbAll('loans'),window.dbAll('auditLogs')]);}catch(e){console.warn('[v4.6.6 home data]',e);return;}
+    let sales=[],loans=[];
+    try{[sales,loans]=await Promise.all([window.dbAll('sales'),window.dbAll('loans')]);}catch(e){console.warn('[v4.6.6 home data]',e);return;}
     if(seq!==homeFocusSeq466||window.appState?.route!=='dashboard'||!document.body.contains(home))return;
     const openLoans=(loans||[]).filter(loanOpen466),overdue=openLoans.filter(l=>daysToDue466(l)<0),dueSoon=openLoans.filter(l=>{const d=daysToDue466(l);return d>=0&&d<=7;}),dueXhs=(sales||[]).filter(s=>isXhsPending466(s)&&xhsDue466(s)<=0);
     const tasks=[];
@@ -787,27 +787,7 @@
       home.insertBefore(sec,actions||home.lastElementChild);
       sec.querySelectorAll('[data-v466-task]').forEach(btn=>btn.onclick=()=>{const k=btn.dataset.v466Task;if(k==='xhs')window.navigate?.('sales',{xhs:'pending'});else window.navigate?.('loans');});
     }
-    const supported=(logs||[]).filter(x=>['sale','loan','product'].includes(String(x.entityType||''))&&String(x.entityId||'').trim()&&!['backup.restore','data.clear'].includes(String(x.action||''))).sort((a,b)=>timeValue466(b.createdAt)-timeValue466(a.createdAt)).slice(0,4);
-    if(supported.length){
-      const sec=document.createElement('section');sec.id='v466Recent';sec.className='v466-section';sec.innerHTML=`<div class="v466-head"><strong>最近操作</strong><span>最多显示 4 条</span></div><div class="v466-recent-list">${supported.map((x,i)=>`<button type="button" class="v466-recent" data-v466-recent="${i}"><span class="v466-recent-icon">${auditIcon466(String(x.entityType||''),String(x.action||''))}</span><span class="v466-recent-copy"><strong>${esc466(auditLabel466(String(x.action||'')))}</strong><small>${esc466(x.summary||x.entityId||'')}</small></span><span class="v466-recent-time">${relativeTime466(x.createdAt)}</span></button>`).join('')}</div>`;
-      // 常用操作固定在最近操作上方；不要在每次首页刷新后把最近操作插到前面。
-      if(actions)actions.insertAdjacentElement('afterend',sec);else home.insertBefore(sec,home.lastElementChild);
-      sec.querySelectorAll('[data-v466-recent]').forEach(btn=>btn.onclick=async()=>{
-        const x=supported[Number(btn.dataset.v466Recent)||0];if(!x)return;
-        const type=String(x.entityType||''),id=String(x.entityId||'');
-        if(btn.dataset.loading==='1')return;btn.dataset.loading='1';
-        try{
-          const store=type==='product'?'products':type==='loan'?'loans':'sales';
-          const entry=await window.dbGet?.(store,id);
-          if(!entry){notify('记录已不存在，已打开对应列表');window.navigate?.(type==='product'?'products':type==='loan'?'loans':'sales');return;}
-          if(type==='product')window.navigate?.('product-detail',{id});
-          else if(type==='loan'&&typeof window.openLoanDetail==='function')window.openLoanDetail(id);
-          else if(type==='sale'&&typeof window.openSaleDetail==='function')window.openSaleDetail(entry);
-          else window.navigate?.(type==='loan'?'loans':'sales',{highlight:id});
-        }catch(err){console.warn('[v4.7.7 recent open]',err);notify('打开记录失败，请重试');}
-        finally{delete btn.dataset.loading;}
-      });
-    }
+    // v4.7.9.3: 最近操作模块已移除，不查询整份审计日志。
     const foot=document.querySelector('.v44-home-foot');if(foot)foot.textContent=`v${CURRENT} · 连续处理版`;
   }
   function scheduleDashboard466(){
@@ -1388,7 +1368,7 @@
     if(window.__mocuiStability475)return true;if(!window.__mocuiSearchFix474)return false;
     window.__mocuiStability475=true;
     ['renderDashboard','renderProducts','renderSales','renderLoans','renderReports','renderMore','renderSaleNew','renderLoanFormModal','renderSettings'].forEach(name=>addAfterHook471(name,'v475',()=>{syncStableLabel475();if(name==='renderSettings')hardenSettings475();setTimeout(syncStableLabel475,560);},{awaitAfter:false}));
-    addNavigateHook471('after','v475-update',()=>{setTimeout(()=>{tryActivatePending475();syncStableLabel475();},80);});
+    addNavigateHook471('after','v475-update',()=>{syncStableLabel475();});
     if(window.appState?.route==='settings')hardenSettings475();syncStableLabel475();setTimeout(syncStableLabel475,620);return true;
   }
   function waitStability475(){let attempts=0;const tick=()=>{attempts++;if(installStability475()||attempts>300)return;setTimeout(tick,50);};setTimeout(tick,610);}
@@ -1396,7 +1376,7 @@
   // ===== PWA 更新机制 =====
   function notify(msg){const t=qs('#toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(notify.t);notify.t=setTimeout(()=>t.classList.remove('show'),1800);}
   function updateOnlineState(){document.documentElement.dataset.online=navigator.onLine?'yes':'no';let bar=qs('#pwaOfflineBar');if(!navigator.onLine){if(!bar){bar=document.createElement('div');bar.id='pwaOfflineBar';bar.className='pwa-offline-bar';bar.textContent='当前离线：本机数据仍可使用，联网后再同步';document.body.appendChild(bar);}}else if(bar)bar.remove();}
-  async function remoteVersion(){try{const r=await fetch(`${VERSION_URL}?t=${Date.now()}`,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return String(j.version||'');}catch{return '';}}
+  async function remoteVersion(){try{const r=await fetch(`${VERSION_URL}?t=${Date.now()}`,{cache:'no-store'});if(!r.ok)return '';const j=await r.json();return j.channel==='stable'?String(j.version||''):'';}catch{return '';}}
   function waitForWaiting475(reg,timeout=2600){
     return new Promise(resolve=>{
       if(!reg)return resolve(null);if(reg.waiting)return resolve(reg.waiting);
@@ -1433,7 +1413,8 @@
     try{
       registration=registration||await navigator.serviceWorker.getRegistration('./')||await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});
       const rv=await remoteVersion();
-      if(registration.waiting){await activateWaiting475(registration,rv||'');return true;}
+      if(!rv)return false; // 候选版禁止自动或手动接管到正式 PWA。
+      if(registration.waiting){await activateWaiting475(registration,rv);return true;}
       await registration.update();
       if(rv&&rv!==CURRENT){
         localStorage.setItem('mocui_downloaded_update_target',rv);localStorage.setItem(UPDATE_PENDING_475,rv);
@@ -1448,7 +1429,7 @@
   }
   async function registerSW(){
     if(!('serviceWorker' in navigator))return;
-    try{registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});if(registration.waiting)await tryActivatePending475();setTimeout(()=>checkForUpdate({force:true}),800);}catch(e){console.warn('PWA service worker registration failed',e);}
+    try{registration=await navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'});/* 更新只由用户明确操作触发；返回桌面不主动接管。 */}catch(e){console.warn('PWA service worker registration failed',e);}
   }
   function announceVersion(){
     localStorage.setItem('mocui_last_ui_version',CURRENT);
@@ -1456,10 +1437,37 @@
     sessionStorage.removeItem('mocui_update_target');sessionStorage.removeItem('mocui_update_ready');
   }
 
-  window.addEventListener('online',()=>{updateOnlineState();checkForUpdate({force:true});});
+  window.addEventListener('online',updateOnlineState);
   window.addEventListener('offline',updateOnlineState);
-  window.addEventListener('pageshow',()=>checkForUpdate());
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden){tryActivatePending475();checkForUpdate();}});
+  // v4.7.9.3: iPhone 后台恢复只恢复布局，不再触发 SW 更新 / 接管 / 重载。
+  // 设置里的手动更新仍可调用 MocuiPWA.checkForUpdate()。
+  // v4.7.9.3: 新增渲染兜底。仅在页面内容真正为空时提供人工恢复入口。
+  // 不自动 reload、不删除任何本机数据，也不在有表单的页面强制跳转。
+  function installResumeGuard4793(){
+    let pending=0;
+    const check=()=>{
+      clearTimeout(pending);
+      pending=setTimeout(()=>{
+        if(document.hidden)return;
+        const app=qs('#app'),main=qs('#main'),boot=qs('#bootScreen');
+        if(!app||!main||boot&&!boot.classList.contains('is-ready'))return;
+        if(main.children.length||String(main.textContent||'').trim())return;
+        main.innerHTML='<div class="notice warn" style="margin:22px 14px;line-height:1.7"><strong>页面暂时没有显示内容</strong><p>请点击下方按钮返回首页。此操作不清除本机数据，也不自动重复加载。</p><button type="button" id="mocuiResumeHome4793" class="btn">返回首页</button></div>';
+        const btn=main.querySelector('#mocuiResumeHome4793');
+        btn.onclick=()=>{if(typeof window.navigate==='function')window.navigate('dashboard',{}, {reset:true}).catch(err=>notify(err?.message||'返回失败'));};
+      },1500);
+    };
+    window.addEventListener('pageshow',check,{passive:true});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)check();},{passive:true});
+  }
+  async function registerExistingOrNew4793(){
+    if(!('serviceWorker' in navigator)||document.hidden)return;
+    try{
+      registration=await navigator.serviceWorker.getRegistration('./');
+      // 已安装的 PWA 不在每次打开时重新注册，不产生后台下载风暴。
+      if(!registration)await registerSW();
+    }catch(e){console.warn('[v4.7.9.3 SW check]',e);}
+  }
   window.MocuiPWA={version:CURRENT,checkForUpdate:()=>checkForUpdate({force:true}),repairAppCache};
-  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();registerSW();waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();waitContinuous468();waitPageMemory469();waitGlobalDirect470();waitSyncSafety472();waitLoanPeople473();waitSearchFix474();waitStability475();});
+  document.addEventListener('DOMContentLoaded',()=>{updateOnlineState();announceVersion();installResumeGuard4793();setTimeout(registerExistingOrNew4793,4500);waitInteraction();waitWorkflow463();waitSearch464();waitProductCards465();waitHomeFocus466();waitContacts467();waitContinuous468();waitPageMemory469();waitGlobalDirect470();waitSyncSafety472();waitLoanPeople473();waitSearchFix474();waitStability475();});
 })();

@@ -172,14 +172,20 @@
   }
 
   async function fullScanOnce(){
-    const local=await snapshotLocal(),shadows=await all("shadow");
+    // v4.7.9.3: 一次只读取一个业务表，避免几百件玉石的图片和所有账本常驻内存。
+    // 保持原有哈希 / 脏数据 / 删除判断语义，不自动删除原始业务记录。
+    const db=await openMainDb(),shadows=await all("shadow");
     const shadowMap=new Map(shadows.map(x=>[x.key,x])),current=new Set();
     for(const store of STORES){
-      for(const row of local[store]||[]){
+      const rows=db.objectStoreNames.contains(store)
+        ?await reqP(db.transaction(store,"readonly").objectStore(store).getAll()):[];
+      let processed=0;
+      for(const row of rows){
         if(row?.id==null)continue;
-        const key=entityKey(store,row.id);current.add(key);
-        const hash=await hashValue(row),shadow=shadowMap.get(key);
-        if(!shadow||shadow.deleted||shadow.hash!==hash)await put("dirty",{key,store,recordId:String(row.id),mutation:"put",payload:row,createdAt:now()});
+        const k=entityKey(store,row.id);current.add(k);
+        const hash=await hashValue(row),shadow=shadowMap.get(k);
+        if(!shadow||shadow.deleted||shadow.hash!==hash)await put("dirty",{key:k,store,recordId:String(row.id),mutation:"put",payload:row,createdAt:now()});
+        if(++processed%12===0)await new Promise(r=>setTimeout(r,0));
       }
       await new Promise(r=>setTimeout(r,0));
     }
@@ -321,8 +327,8 @@
     const result=await original.bootstrap({...options,deferPull:true});authenticated=true;await firstBootstrapIfNeeded();
     const [pending,conflicts]=await Promise.all([all("outbox"),all("conflicts")]);
     if(conflicts.length)updateStatus("conflict");else if(pending.length||hasDirtyMarker())updateStatus("pending");else updateStatus("synced");
-    // 首屏不等待云端；空闲后后台同步。
-    setTimeout(()=>void syncCycle().catch(()=>{}),120);
+    // v4.7.9.3: 由 app-core 在首屏稳定后发起一次同步。
+    // 此处不再启动第二个同步循环，防止同步争抢和错误的“同步完成”回调。
     return{...result,protocol:"v3-journal"};
   }
   async function status(){const [o,c,d]=await Promise.all([all("outbox"),all("conflicts"),all("dirty")]);return{cursor,outbox:o.length,conflicts:c.length,dirty:d.length}}

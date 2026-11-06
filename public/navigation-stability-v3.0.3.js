@@ -7,7 +7,7 @@
   let running=false;
   let queued=null;
 
-  const routeNames={dashboard:'概况',products:'商品',loans:'调借',reports:'报表',more:'更多'};
+  const routeNames={dashboard:'概况',products:'商品',loans:'调借',reports:'报表',more:'更多','pass-deals':'过手差价','pass-deal-new':'新建过手单'};
   function mainEl(){ return document.getElementById('main'); }
 
   function clearTransitionState(){

@@ -1591,13 +1591,47 @@ function passDealCard(row){
   return `<div class="card pass-deal-card" data-id="${row.id}" style="${cancelled?'opacity:.72':''}"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="item-title">${esc(row.itemName)} · ${esc(row.dealNo)}</div><div class="item-meta">${fmtDateTime(row.createdAt)} · ${esc(row.sourceName)} → ${esc(row.buyerName)}</div></div><div class="item-right"><strong>${fmtMoney(profit)}</strong><span class="badge ${cancelled?'danger':profit>=0?'success':'warn'}">${cancelled?'已作废':'差价'}</span></div></div><div class="item-meta" style="margin-top:8px">成交 ${fmtMoney(row.saleAmount)} · 成本 ${fmtMoney(row.costAmount)} · 实收 ${fmtMoney(row.receivedAmount)} · 已付货主 ${fmtMoney(row.sourcePaidAmount)}</div>${passDealBuyerDue(row)||passDealSourceDue(row)?`<div class="notice warn" style="margin-top:8px">买家未收 ${fmtMoney(passDealBuyerDue(row))} · 货主未付 ${fmtMoney(passDealSourceDue(row))}</div>`:''}<div class="btn-row" style="margin-top:10px">${cancelled?`<button class="btn small success restore-pass-deal" data-id="${row.id}">恢复</button>`:`<button class="btn small danger cancel-pass-deal" data-id="${row.id}">作废</button>`}</div></div>`;
 }
 async function renderPassDeals(){
+  // v4.7.9.3: 先显示界面，再异步读取记录。一次最多绘制 24 条，避免 iOS 长任务。
   setHeader('过手差价','独立成交、成本、收付款与差价',{label:'＋',onClick:()=>{appState.passDealDraft=null;clearLocalDraft(PASS_DEAL_PENDING_KEY);navigate('pass-deal-new');}});
-  const rows=(await getPassDeals()).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
-  $('#main').innerHTML=`<div class="notice"><strong>独立账，不影响库存。</strong> 普通销售、调借销售仍走原来的销售/库存流程；这里仅用于没有正式建商品的临时过手差价。</div><div class="segment" id="passDealStatus"><button data-status="active" class="active">有效</button><button data-status="all">全部</button><button data-status="cancelled">已作废</button></div><div class="toolbar"><div class="search"><input id="passDealSearch" placeholder="货品、货主、买家、单号"></div></div><div id="passDealList" class="list"></div>`;
-  let status='active';
-  const draw=()=>{const q=$('#passDealSearch').value.trim().toLowerCase(),filtered=rows.filter(r=>(status==='all'||(status==='active'?passDealIsActive(r):!passDealIsActive(r)))&&(!q||[r.dealNo,r.itemName,r.sourceName,r.buyerName,r.note].some(v=>String(v||'').toLowerCase().includes(q))));$('#passDealList').innerHTML=filtered.length?filtered.map(passDealCard).join(''):emptyState('↔','暂无过手差价记录','点右上角＋记录一笔临时转差价');$$('.pass-deal-card').forEach(el=>el.onclick=e=>{if(e.target.closest('button'))return;openPassDealDetail(rows.find(x=>x.id===el.dataset.id));});$$('.cancel-pass-deal').forEach(b=>b.onclick=()=>cancelPassDeal(b.dataset.id));$$('.restore-pass-deal').forEach(b=>b.onclick=()=>restorePassDeal(b.dataset.id));};
-  draw();$('#passDealSearch').oninput=draw;$$('#passDealStatus button').forEach(b=>b.onclick=()=>{status=b.dataset.status;$$('#passDealStatus button').forEach(x=>x.classList.toggle('active',x===b));draw();});
+  const main=$('#main');
+  main.innerHTML=`<div class="notice"><strong>独立账，不影响库存。</strong> 这里只记录未正式建档的过手差价。</div>
+    <div class="segment" id="passDealStatus"><button data-status="active" class="active">有效</button><button data-status="all">全部</button><button data-status="cancelled">已作废</button></div>
+    <div class="toolbar"><div class="search"><input id="passDealSearch" placeholder="货品、货主、买家、单号" autocomplete="off"></div></div>
+    <div id="passDealList" class="list"><div class="notice">正在读取过手单…</div></div>
+    <button id="passDealMore" class="btn secondary block hidden" type="button">继续显示</button>`;
+  await nextFrame();
+  if(appState.route!=='pass-deals'||!main.isConnected)return;
+  let rows;
+  try{rows=(await getPassDeals()).slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));}
+  catch(err){if(appState.route==='pass-deals'&&main.isConnected){const host=main.querySelector('#passDealList');if(host)host.innerHTML=`<div class="notice danger">读取过手单失败：${esc(err?.message||'请重试')}</div>`;}return;}
+  if(appState.route!=='pass-deals'||!main.isConnected||!main.querySelector('#passDealList'))return;
+  const input=main.querySelector('#passDealSearch'),host=main.querySelector('#passDealList'),more=main.querySelector('#passDealMore'),tabs=main.querySelector('#passDealStatus');
+  let status='active',shown=24,filtered=[],searchTimer=null;
+  const draw=()=>{
+    if(appState.route!=='pass-deals'||!host.isConnected)return;
+    const q=input.value.trim().toLowerCase();
+    filtered=rows.filter(r=>(status==='all'||(status==='active'?passDealIsActive(r):!passDealIsActive(r)))&&(!q||[r.dealNo,r.itemName,r.sourceName,r.buyerName,r.note].some(v=>String(v||'').toLowerCase().includes(q))));
+    const visible=filtered.slice(0,shown);
+    host.innerHTML=visible.length?visible.map(passDealCard).join(''):emptyState('↔','暂无过手差价记录','点右上角＋记录一笔临时转差价');
+    more.classList.toggle('hidden',shown>=filtered.length);
+    more.textContent=`继续显示（剩余 ${Math.max(0,filtered.length-shown)} 条）`;
+  };
+  host.onclick=e=>{
+    const btn=e.target.closest('button'),card=e.target.closest('.pass-deal-card');
+    if(!card)return;const id=card.dataset.id;
+    if(btn?.classList.contains('cancel-pass-deal')){void cancelPassDeal(id);return;}
+    if(btn?.classList.contains('restore-pass-deal')){void restorePassDeal(id);return;}
+    if(!btn)openPassDealDetail(rows.find(x=>x.id===id));
+  };
+  more.onclick=()=>{shown+=24;draw();};
+  let composing=false;
+  input.addEventListener('compositionstart',()=>{composing=true;clearTimeout(searchTimer);});
+  input.addEventListener('compositionend',()=>{composing=false;shown=24;draw();});
+  input.oninput=()=>{if(composing)return;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{shown=24;draw();},110);};
+  tabs.onclick=e=>{const btn=e.target.closest('button[data-status]');if(!btn)return;status=btn.dataset.status;shown=24;tabs.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===btn));draw();};
+  draw();
 }
+
 function openPassDealDetail(row){
   if(!row)return;const profit=passDealProfit(row);
   openModal(`过手单 ${row.dealNo}`,`${row.image?`<img src="${esc(row.image)}" alt="过手货" style="display:block;width:100%;max-height:260px;object-fit:contain;border-radius:12px;margin-bottom:10px">`:''}<div class="grid-2"><div class="metric compact"><div class="label">货主</div><div class="value" style="font-size:14px">${esc(row.sourceName)}</div></div><div class="metric compact"><div class="label">买家</div><div class="value" style="font-size:14px">${esc(row.buyerName)}</div></div></div><div class="section-title">${esc(row.itemName)} <small>数量 ${fmtInt(row.qty)}</small></div><div class="total-box"><div class="total-row"><span>成交</span><strong>${fmtMoney(row.saleAmount)}</strong></div><div class="total-row"><span>成本</span><strong>${fmtMoney(row.costAmount)}</strong></div><div class="total-row"><span>实收 / 买家未收</span><strong>${fmtMoney(row.receivedAmount)} / ${fmtMoney(passDealBuyerDue(row))}</strong></div><div class="total-row"><span>已付货主 / 未付</span><strong>${fmtMoney(row.sourcePaidAmount)} / ${fmtMoney(passDealSourceDue(row))}</strong></div><div class="total-row grand"><span>差价利润</span><strong>${fmtMoney(profit)}</strong></div></div><div class="notice">状态：${passDealIsActive(row)?'有效':'已作废'}<br>时间：${fmtDateTime(row.createdAt)}<br>备注：${esc(row.note||'无')}<br><strong>库存影响：0</strong></div>`,{});
@@ -2404,7 +2438,7 @@ async function init(){
   setupViewportBehavior();
   history.scrollRestoration='manual';
   bindPrimaryNavigation();
-  if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').catch(()=>{});}
+  // Service Worker 注册统一由 pwa.js 负责，避免启动时重复检查版本。
 
   // 先在启动层后面渲染本机缓存，身份验证成功后可以立即显示。
   await render();
@@ -2418,7 +2452,7 @@ async function init(){
   // 云端完整数据改为后台同步，不再阻塞首页显示。
   document.documentElement.dataset.initialSync='pending';
   showInitialSyncPill();
-  const initialPull=CloudSync.pull();
+  const initialPull=new Promise((resolve,reject)=>setTimeout(()=>{CloudSync.pull().then(resolve,reject);},2600));
   window.__mocuiInitialPullPromise=initialPull;
   initialPull.then(async()=>{
     await ensureDefaults();
@@ -2426,7 +2460,8 @@ async function init(){
     const recoveredCloudStocktakes=await recoverPendingStocktakes();
     const repairedDuplicates=await reconcileQinsilkHistoricalDuplicates();
     if(repairedDuplicates||categoryMigrated||recoveredCloudStocktakes||recoveredLocalStocktakes){try{await CloudSync.push();}catch(_){window.CloudSync?.schedule();}}
-    await refreshCurrentPageAfterPull();
+    // 不在同步完成时强制重绘正在使用的页面，避免 iPhone 页面重入/选货丢失。
+    // 用户返回首页或切换页面时，相关页面会读取已经同步的数据。
     hideInitialSyncPill();
     if(repairedDuplicates)showToast(`已自动排除 ${repairedDuplicates} 笔秦丝重复历史销售`);else if(categoryMigrated)showToast('分类已自动整理为一级 / 子分类');
   }).catch(()=>{
