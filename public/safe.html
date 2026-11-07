@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f6f7f6"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>漠翠进销存 · 本机安全模式</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;background:#f6f7f6;color:#1a2721;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;-webkit-text-size-adjust:100%}main{max-width:640px;margin:auto;padding:calc(28px + env(safe-area-inset-top)) 17px calc(40px + env(safe-area-inset-bottom))}h1{font-size:23px;letter-spacing:-.4px;margin:0 0 7px;font-weight:750}h2{font-size:16px;margin:0 0 14px}p,small{color:#65746a;line-height:1.65}p{font-size:13px;margin:7px 0 0}small{font-size:11px}.tag{display:inline-flex;background:#e7efe9;color:#315c43;border-radius:100px;padding:5px 10px;font-size:11px;font-weight:700;margin-bottom:14px}.card{background:#fff;border:1px solid #e4e9e5;border-radius:18px;padding:17px;margin-top:14px;box-shadow:0 2px 8px #00000004}.warn{background:#fffaf2;border-color:#f1e0c3}.g{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.metric{background:#f7f9f7;padding:14px;border-radius:13px}.metric b{font-size:24px;display:block;margin:5px 0}.metric label{font-size:12px;color:#617166}.row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:10px 0;font-size:13px}.row strong{text-align:right;overflow-wrap:anywhere}button{border:0;border-radius:12px;background:#233b2c;color:#fff;font:650 14px -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;padding:14px 18px;width:100%;margin-top:12px;cursor:pointer}button:disabled{opacity:.55}.secondary{background:#eef3ef;color:#274331}.danger{color:#8d3b24;background:#fff0e8}.inline-controls{display:flex;gap:9px}.inline-controls button{margin-top:10px}.input{height:46px;border:1px solid #d9e1db;border-radius:12px;padding:0 12px;width:100%;font-size:16px;background:#fff;color:#1a2721}#details{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f3;border-radius:11px;padding:12px;font-size:11px;line-height:1.6;max-height:220px;overflow:auto}.result{margin-top:8px;font-size:13px;line-height:1.65}.rows{display:grid;gap:8px;margin-top:12px}.item{border:1px solid #e6ece6;border-radius:12px;padding:12px;background:#fafbfa}.item b{font-size:14px}.item p{font-size:12px;margin-top:3px}.hidden{display:none}.status{font-size:12px;color:#4a6752}.bad{color:#a0342d}.good{color:#226b45}.footer{margin-top:20px;text-align:center;color:#88968b;font-size:11px}
+</style></head>
+<body><main>
+<div class="tag">应急安全模式 · 本机只读</div>
+<h1>漠翠进销存</h1>
+<p>此页面<strong>不会启动正常 ERP、云端同步、缓存重建或库存修改</strong>。仅在你主动点击后读取本机数据库。</p>
+<section class="card warn"><h2>业务数据保护</h2><p>不清理数据、不重建数据库、不导入云端快照、不新增销售或借调。请从<strong>原来的 iPhone 桌面 ERP 内</strong>进入此页面，Safari 独立标签页可能使用不同的本机数据库。</p></section>
+<section class="card"><h2>本机数据库状态</h2><div id="state" class="status">尚未读取。点击下方按钮进行安全检查。</div><button id="inspect">检查本机记录数</button><div id="metrics" class="g hidden"><div class="metric"><label>商品档案</label><b id="countProducts">—</b></div><div class="metric"><label>正式销售单</label><b id="countSales">—</b></div><div class="metric"><label>全部借调单</label><b id="countLoans">—</b></div><div class="metric"><label>库存流水</label><b id="countMoves">—</b></div></div><div id="summary" class="result"></div></section>
+<section class="card"><h2>待同步队列 · 仅统计</h2><p>这里检查本机是否还有尚未发送或尚未处理的同步任务，绝不触发上传。</p><button id="checkQueue" class="secondary">统计同步队列</button><div id="queues" class="result">尚未检查。</div></section>
+<section class="card"><h2>按货号 / 名称查找本机商品</h2><p>每次最多显示 20 条，不加载商品图片，不做整库缓存。</p><input class="input" id="keyword" placeholder="输入货号或商品名称" autocomplete="off"><button id="search" class="secondary">只读查找</button><div id="found" class="rows"></div></section>
+<section class="card"><h2>进一步核对 · 手动执行</h2><p>如手机能够稳定显示，可单独计算本机库存数量与未结清借调单数；这一步会扫描对应记录，默认不会自动运行。</p><button id="compute" class="secondary">计算本机库存与未结清单</button><div id="computed" class="result"></div></section>
+<section class="card"><h2>安全诊断摘要</h2><pre id="details">尚无诊断信息。</pre><div class="inline-controls"><button id="copy" class="secondary">复制摘要</button><button id="normal" class="danger">退出安全模式</button></div><p>复制的摘要只包括记录数量、队列数量与错误信息，不包含价格、客户资料或商品图片。</p></section>
+<div class="footer">漠翠珠宝 · 只读应急界面 v4.7.9.6 · 不代表同步已经完成</div>
+</main>
+<script>
+'use strict';(()=>{
+  const $=id=>document.getElementById(id), KEY='mocui_safe_readonly_v4796';
+  const names={products:'countProducts',sales:'countSales',loans:'countLoans',stockMoves:'countMoves'};
+  const summary={app:'mocui-safe-readonly-v4796',time:new Date().toISOString(),context:location.pathname,operation:'none',counts:{},sync:{},extra:{},errors:[]};
+  const plainError=e=>String(e?.message||e||'未知错误').slice(0,240);
+  const show=()=>{$('details').textContent=JSON.stringify(summary,null,2)};
+  const busy=async(btn,fn)=>{btn.disabled=true;try{await fn()}catch(e){summary.errors.push(plainError(e));$('state').textContent='检查失败：'+plainError(e);$('state').className='status bad'}finally{btn.disabled=false;show()}};
+  const wait=(p,ms=9500)=>Promise.race([p,new Promise((_,reject)=>setTimeout(()=>reject(new Error('等待数据库超过 '+ms+' 毫秒，可能被其他页面阻塞')),ms))]);
+  async function knownDb(name){
+    if(typeof indexedDB?.databases!=='function')throw new Error('此浏览器无法安全列出本机数据库，为避免创建空库，未尝试连接');
+    const dbs=await wait(indexedDB.databases());
+    return dbs.some(x=>x?.name===name);
+  }
+  async function openExisting(name){
+    if(!await knownDb(name))return null;
+    return new Promise((resolve,reject)=>{
+      const req=indexedDB.open(name);let done=false;
+      const guard=setTimeout(()=>end(false,new Error('连接超过 9500 毫秒，可能有其他页面阻塞')),9500);
+      const end=(ok,value)=>{if(done){if(ok)try{value.close()}catch{};return;}done=true;clearTimeout(guard);ok?resolve(value):reject(value)};
+      req.onupgradeneeded=()=>{try{req.transaction?.abort()}catch{}end(false,new Error('检测到数据库不存在或需要创建，已阻止更改'))};
+      req.onblocked=()=>end(false,new Error('数据库连接被其他标签页阻塞'));
+      req.onerror=()=>end(false,req.error||new Error('打开数据库失败'));
+      req.onsuccess=()=>{const db=req.result;db.onversionchange=()=>db.close();end(true,db)};
+    });
+  }
+  async function count(db,name){
+    if(!db.objectStoreNames.contains(name))return null;
+    return wait(new Promise((resolve,reject)=>{
+      const tx=db.transaction(name,'readonly'),r=tx.objectStore(name).count();let value=null;
+      r.onsuccess=()=>{value=r.result};r.onerror=()=>reject(r.error||new Error('读取失败'));
+      tx.oncomplete=()=>resolve(value);tx.onerror=()=>reject(tx.error||new Error('只读事务失败'));tx.onabort=()=>reject(tx.error||new Error('事务取消'));
+    }));
+  }
+  async function readChunk(db,store,after,limit,mapper){
+    return wait(new Promise((resolve,reject)=>{
+      const tx=db.transaction(store,'readonly'),os=tx.objectStore(store);
+      const range=after===null?undefined:IDBKeyRange.lowerBound(after,true);
+      const req=os.openCursor(range);const rows=[];let last=after,finished=false;
+      req.onsuccess=()=>{
+        const cur=req.result;
+        if(!cur){finished=true;return}
+        try{rows.push(mapper(cur.value));last=cur.key}catch(e){reject(e);return}
+        if(rows.length<limit)cur.continue();
+      };
+      req.onerror=()=>reject(req.error||new Error('游标读取失败'));
+      tx.oncomplete=()=>resolve({rows,last,finished});
+      tx.onabort=()=>reject(tx.error||new Error('读取事务取消'));
+      tx.onerror=()=>reject(tx.error||new Error('读取事务失败'));
+    }),12000);
+  }
+  async function scan(db,store,map,onItem,max=15000){
+    if(!db.objectStoreNames.contains(store))throw new Error('本机缺少数据表：'+store);
+    let after=null,seen=0;
+    for(;;){
+      const page=await readChunk(db,store,after,6,map);
+      for(const row of page.rows){onItem(row);seen++;if(seen>=max)throw new Error('超过安全扫描条数限制')}
+      if(page.finished)break;
+      after=page.last;
+      await new Promise(r=>setTimeout(r,0));
+    }
+    return seen;
+  }
+  async function inspect(){const db=await openExisting('mocui_inventory_db');if(!db){$('state').textContent='此浏览器环境未发现正式业务数据库。请从原桌面 ERP 进入，而不是在普通 Safari 打开。';$('state').className='status bad';summary.extra.businessDb='absent-in-this-context';return}
+    try{summary.extra.businessDb='present';summary.extra.businessDbVersion=db.version;
+      for(const [name,id] of Object.entries(names)){const v=await count(db,name);summary.counts[name]=v;$(id).textContent=v??'缺失'}
+      $('metrics').classList.remove('hidden');$('state').textContent='本机业务数据库可以读取（不代表云端已同步）。';$('state').className='status good';$('summary').textContent='只读取各数据表数量；没有扫描商品图片，也没有写入记录。';
+    }finally{db.close()}
+  }
+  async function queue(){const db=await openExisting('mocui_sync_v2');if(!db){$('queues').textContent='当前环境未找到同步库（可能是独立 Safari 存储）。';summary.extra.syncDb='absent-in-this-context';return}
+    try{summary.extra.syncDb='present';summary.extra.syncDbVersion=db.version;
+      for(const k of ['outbox','dirty','conflicts','shadow'])summary.sync[k]=await count(db,k);
+      $('queues').textContent=`待上传 outbox：${summary.sync.outbox??'未知'} 条；待整理 dirty：${summary.sync.dirty??'未知'} 条；冲突 conflicts：${summary.sync.conflicts??'未知'} 条。`;
+    }finally{db.close()}
+  }
+  async function findProducts(){const word=$('keyword').value.trim().toLocaleLowerCase('zh-CN');if(!word){$('found').textContent='请先输入名称或货号。';return}const db=await openExisting('mocui_inventory_db');if(!db){$('found').textContent='没有找到本机业务库';return}
+    const out=[];let scanned=0;
+    try{scanned=await scan(db,'products',p=>({code:String(p?.code||''),name:String(p?.name||''),stock:Number(p?.stock||0),historicalOnly:!!p?.historicalOnly}),row=>{
+      if(out.length<20&&(row.code+' '+row.name).toLocaleLowerCase('zh-CN').includes(word))out.push(row);
+    });}finally{db.close()}
+    const holder=$('found');holder.replaceChildren();
+    for(const item of out){const div=document.createElement('div');div.className='item';const b=document.createElement('b');b.textContent=item.name||'(无名称)';const p=document.createElement('p');p.textContent=`货号：${item.code||'—'} · 库存：${item.stock} · ${item.historicalOnly?'历史档案':'正式商品'}`;div.append(b,p);holder.appendChild(div)}
+    if(!out.length)holder.textContent='未找到匹配的商品。';
+    summary.extra.search={matchedShown:out.length,scanned};
+  }
+  const n=v=>Math.max(0,Number(v)||0);
+  function loanOutstanding(l){
+    let sum=0;
+    for(const item of l?.items||[]){
+      let returned=0;
+      if(item?.returnedQty!==undefined)returned=Math.min(n(item.qty),n(item.returnedQty));
+      else if(l?.status==='returned')returned=n(item?.qty);
+      else for(const ev of l?.returns||[])returned+=n((ev.items||[]).find(x=>x.productId===item?.productId)?.qty);
+      let sold=0;
+      if(item?.soldQty!==undefined)sold=Math.min(n(item.qty),n(item.soldQty));
+      else for(const ev of l?.saleEvents||[])if(ev.status!=='cancelled')for(const x of ev.items||[])if(String(x?.productId)===String(item?.productId))sold+=n(x.qty);
+      sum+=Math.max(0,n(item?.qty)-returned-sold);
+    }
+    return sum;
+  }
+  async function compute(){const db=await openExisting('mocui_inventory_db');if(!db){$('computed').textContent='未发现本机业务数据库';return}
+    let stock=0,activeLoans=0,loanItems=0,products=0,loans=0;
+    try{
+      products=await scan(db,'products',p=>({stock:Number(p?.stock)||0,historicalOnly:!!p?.historicalOnly}),p=>{if(!p.historicalOnly)stock+=p.stock});
+      loans=await scan(db,'loans',l=>({outstanding:loanOutstanding(l)}),l=>{if(l.outstanding>0){activeLoans++;loanItems+=l.outstanding}});
+      summary.extra.stockCalc={stock,products,activeLoans,loanItems,loans};
+      $('computed').textContent=`本机库存 ${stock} 件；尚有未处理数量的借调单 ${activeLoans} 张（未处理商品件数 ${loanItems}）。这是本机口径，不代表云端已同步。`;
+    }finally{db.close()}
+  }
+  $('inspect').onclick=()=>busy($('inspect'),inspect);
+  $('checkQueue').onclick=()=>busy($('checkQueue'),queue);
+  $('search').onclick=()=>busy($('search'),findProducts);
+  $('compute').onclick=()=>busy($('compute'),compute);
+  $('copy').onclick=()=>{const report=JSON.stringify(summary,null,2);navigator.clipboard?.writeText(report).then(()=>{$('copy').textContent='摘要已复制'},()=>window.prompt('复制摘要',report))??window.prompt('复制摘要',report)};
+  $('normal').onclick=()=>{if(!confirm('正式 ERP 尚未修好，返回后可能再次白屏。确定退出安全模式吗？'))return;try{localStorage.removeItem(KEY)}catch{}location.replace('./index.html?normal=1')};
+  show();
+})();
+</script>
+</body></html>

@@ -1,4 +1,4 @@
-const CACHE='mocui-v4.7.9.4-schema-safety';
+const CACHE='mocui-v4.7.9.6-safe-readonly';
 const SHELL=[
   './','./index.html','./repair.html','./offline.html','./app.css','./core-v4.css?v=4.0.1',
   './ui-icons.css?v=1.4.0','./ui-shell-stable.css','./business-ux-v2.css?v=2.2.0','./ui-refine-v2.4.css?v=2.4.0',
@@ -22,44 +22,27 @@ const SHELL=[
   './manifest.webmanifest','./version.json'
 ];
 
+// Emergency release: pre-cache only the entry pages. Do not download the full
+// ERP script bundle in the background on already unstable iPhone devices.
 self.addEventListener('install',event=>{
   event.waitUntil((async()=>{
     const cache=await caches.open(CACHE);
-    // 关键脚本缺失时不接管旧版本，避免“更新后白屏”。
-    const CRITICAL=new Set(SHELL.filter(u=>u==='./index.html'||/\.js(?:\?|$)/.test(u)));
-    // Limit simultaneous script requests on iPhone; partial install never takes over.
-    const scripts=[...CRITICAL];
-    for(let i=0;i<scripts.length;i+=3){
-      await Promise.all(scripts.slice(i,i+3).map(async u=>{
-        const r=await fetch(u,{cache:'no-store'});
-        if(!r.ok)throw new Error(`关键资源下载失败：${u}`);
-        await cache.put(u,r.clone());
-      }));
+    for(const path of ['./','./index.html','./safe.html']){
+      const response=await fetch(path,{cache:'no-store'});
+      if(!response.ok)throw new Error('安全入口资源不可用：'+path);
+      await cache.put(path,response.clone());
     }
-    // Optional assets are also fetched in small batches to avoid Safari memory spikes.
-    const optional=SHELL.filter(u=>!CRITICAL.has(u));
-    for(let i=0;i<optional.length;i+=4){
-      await Promise.allSettled(optional.slice(i,i+4).map(async u=>{
-        const r=await fetch(u,{cache:'no-store'});
-        if(r.ok)await cache.put(u,r.clone());
-      }));
-    }
-    // 不在用户当前操作时强制接管。
   })());
 });
 self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING_MANUAL')self.skipWaiting();});
-self.addEventListener('activate',event=>{
-  event.waitUntil((async()=>{const keys=(await caches.keys()).filter(k=>k.startsWith('mocui-')&&k!==CACHE);
-    // 保留最近一个旧壳版本，避免正在使用的旧页面突然失去脚本缓存。
-    const stale=keys.slice(0,Math.max(0,keys.length-1));
-    await Promise.all(stale.map(k=>caches.delete(k)));await self.clients.claim();})());
-});
+// Keep previous caches intact during emergency read-only verification.
+self.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});
 async function networkFallback(request,fallback){
   try{const r=await fetch(request,{cache:'no-store'});if(r.ok){const c=await caches.open(CACHE);c.put(request,r.clone()).catch(()=>{});}return r;}
   catch{return (await caches.match(request))||(fallback?await caches.match(fallback):null)||Response.error();}
 }
 async function cacheFirst(request,fallback){
-  const cache=await caches.open(CACHE),cached=await cache.match(request);if(cached)return cached;
+  const cache=await caches.open(CACHE),cached=(await cache.match(request))||(await caches.match(request));if(cached)return cached;
   try{const r=await fetch(request,{cache:'no-store'});if(r.ok)await cache.put(request,r.clone());return r;}catch{return fallback?(await cache.match(fallback))||Response.error():Response.error();}
 }
 self.addEventListener('fetch',event=>{
